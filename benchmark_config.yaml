@@ -24,5 +24,4 @@ logsig_method: "S"
 # which Python libraries to benchmark / plot
 libraries:
   - chen-signatures
-  - iisignature
   - pysiglib
