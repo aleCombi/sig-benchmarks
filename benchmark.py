@@ -1,134 +1,325 @@
-"""
-Minimal benchmarks: chen-signatures vs iisignature vs pysiglib
-"""
-import numpy as np
+# benchmark.py
+import os
+import csv
 import time
-import chen
-import iisignature
-import pysiglib
-import torch
+import tracemalloc
+import sys
+from pathlib import Path
+from datetime import datetime
 
-def benchmark_speed(N=1000, d=5, m=7, runs=20):
-    """Compare signature computation speed"""
-    print(f"\n{'='*70}")
-    print(f"SPEED BENCHMARK: N={N}, d={d}, m={m}")
-    print(f"{'='*70}")
-    
-    path = np.ascontiguousarray(np.random.randn(N, d), dtype=np.float64)
-    
-    # Chen
-    _ = chen.sig(path, m)
-    times = [time.perf_counter() for _ in range(runs)]
-    for i in range(runs):
-        t0 = time.perf_counter()
-        chen.sig(path, m)
-        times[i] = time.perf_counter() - t0
-    t_chen = min(times) * 1000
-    
-    # iisignature
-    _ = iisignature.sig(path, m)
-    times = [time.perf_counter() for _ in range(runs)]
-    for i in range(runs):
-        t0 = time.perf_counter()
-        iisignature.sig(path, m)
-        times[i] = time.perf_counter() - t0
-    t_iisig = min(times) * 1000
-    
-    # pysiglib
-    _ = pysiglib.signature(path, m)
-    times = [time.perf_counter() for _ in range(runs)]
-    for i in range(runs):
-        t0 = time.perf_counter()
-        pysiglib.signature(path, m)
-        times[i] = time.perf_counter() - t0
-    t_pysig = min(times) * 1000
-    
-    print(f"chen:        {t_chen:6.1f} ms  (baseline)")
-    print(f"iisignature: {t_iisig:6.1f} ms  ({t_iisig/t_chen:.2f}x)")
-    print(f"pysiglib:    {t_pysig:6.1f} ms  ({t_pysig/t_chen:.2f}x)")
+import numpy as np
 
+# Import shared utilities
+from common import load_config, make_path, SCRIPT_DIR
 
-def benchmark_correctness(N=100, d=3, m=5):
-    """Compare signature correctness"""
-    print(f"\n{'='*70}")
-    print(f"CORRECTNESS: N={N}, d={d}, m={m}")
-    print(f"{'='*70}")
+# Try importing libraries
+try:
+    import iisignature
+    HAS_IISIG = True
+except ImportError:
+    HAS_IISIG = False
+    print("Warning: iisignature not available", file=sys.stderr)
+
+try:
+    import pysiglib
+    HAS_PYSIGLIB = True
+except ImportError:
+    HAS_PYSIGLIB = False
+    print("Warning: pysiglib not available", file=sys.stderr)
+
+# chen-signatures (Python wrapper for ChenSignatures.jl)
+HAS_CHEN = False
+chen = None
+try:
+    try:
+        import chen_signatures as chen  # preferred
+    except ImportError:
+        import chen  # fallback if you chose simple 'chen' as module name
+    HAS_CHEN = True
+except ImportError:
+    print("Warning: chen-signatures (chen_signatures/chen) not available", file=sys.stderr)
+
+# -------- benchmarking helpers --------
+
+def time_and_peak_memory(func, repeats: int = 5):
+    best_time = float("inf")
+    best_peak = 0
+
+    for _ in range(repeats):
+        tracemalloc.start()
+        start = time.perf_counter()
+        func()
+        end = time.perf_counter()
+        current, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+
+        dur = end - start
+        if dur < best_time:
+            best_time = dur
+            best_peak = peak
+
+    return best_time, best_peak
+
+# -------- benchmark implementations --------
+
+def bench_iisignature(d: int, m: int, N: int, path_kind: str, operation: str, method: str, repeats: int):
+    """Benchmark using iisignature library"""
+    if not HAS_IISIG:
+        return None
+        
+    # Force clear iisignature cache to prevent 'prepare' conflicts
+    if hasattr(iisignature, "_basis_cache"):
+        iisignature._basis_cache.clear()
+        
+    path = make_path(d, N, path_kind)
     
-    path = np.ascontiguousarray(np.random.randn(N, d), dtype=np.float64)
-    
-    sig_chen = chen.sig(path, m)
-    sig_iisig = iisignature.sig(path, m)
-    sig_pysig = pysiglib.signature(path, m)
-    
-    diff_iisig = np.abs(sig_chen - sig_iisig).max()
-    diff_pysig = np.abs(sig_chen - sig_pysig).max()
-    
-    print(f"chen vs iisignature: max diff = {diff_iisig:.2e}")
-    print(f"chen vs pysiglib:    max diff = {diff_pysig:.2e}")
-    
-    if diff_iisig < 1e-10 and diff_pysig < 1e-10:
-        print("✓ All implementations agree")
+    if operation == "signature":
+        arg = m
+        func = iisignature.sig
+        method_name = "sig"
+    elif operation == "logsignature":
+        if d < 2:
+            return None
+        try:
+            arg = iisignature.prepare(d, m, method)
+            func = lambda p, basis: iisignature.logsig(p, basis, method)
+            method_name = "logsig"
+        except Exception as e:
+            print(f"Error preparing iisignature for d={d}, m={m}, method={method}: {e}", file=sys.stderr)
+            return None
     else:
-        print("⚠ Significant differences detected")
+        raise ValueError(f"Unknown operation: {operation}")
 
+    try:
+        # warmup
+        _ = func(path, arg)
 
-def benchmark_gradients(N=50, d=3, m=3):
-    """Compare PyTorch gradients: chen vs pysiglib"""
-    print(f"\n{'='*70}")
-    print(f"PYTORCH GRADIENTS: N={N}, d={d}, m={m}")
-    print(f"{'='*70}")
+        def run_op():
+            func(path, arg)
+
+        t_sec, peak_bytes = time_and_peak_memory(run_op, repeats=repeats)
+    except Exception as e:
+        print(f"iisignature benchmark failed for {operation} d={d} m={m}: {e}", file=sys.stderr)
+        return None
+
+    t_ms = t_sec * 1000.0
+    alloc_kib = peak_bytes / 1024.0
+
+    return {
+        "N": N,
+        "d": d,
+        "m": m,
+        "path_kind": path_kind,
+        "operation": operation,
+        "language": "python",
+        "library": "iisignature",
+        "method": method_name,
+        "path_type": "ndarray",
+        "t_ms": t_ms,
+        "alloc_KiB": alloc_kib,
+    }
+
+def bench_pysiglib(d: int, m: int, N: int, path_kind: str, operation: str, repeats: int):
+    """Benchmark using pysiglib library (signature only - no logsig support)"""
+    if not HAS_PYSIGLIB:
+        return None
     
-    # Import torch integration
-    from chen.torch import sig_torch
+    # pysiglib only supports signature
+    if operation != "signature":
+        return None
     
-    # Chen gradients
-    path_chen = torch.randn(N, d, requires_grad=True, dtype=torch.float64)
-    sig = sig_torch(path_chen, m)
-    loss = sig.sum()
-    loss.backward()
-    grad_chen = path_chen.grad.clone()
+    path = make_path(d, N, path_kind)
     
-    # pysiglib gradients (finite differences)
-    path_np = path_chen.detach().numpy()
-    eps = 1e-6
-    grad_pysig = np.zeros_like(path_np)
-    
-    for i in range(N):
-        for j in range(d):
-            path_plus = path_np.copy()
-            path_plus[i, j] += eps
-            path_minus = path_np.copy()
-            path_minus[i, j] -= eps
-            
-            sig_plus = pysiglib.signature(path_plus, m).sum()
-            sig_minus = pysiglib.signature(path_minus, m).sum()
-            
-            grad_pysig[i, j] = (sig_plus - sig_minus) / (2 * eps)
-    
-    diff = np.abs(grad_chen.numpy() - grad_pysig).max()
-    rel_diff = diff / np.abs(grad_pysig).max()
-    
-    print(f"Max absolute difference: {diff:.2e}")
-    print(f"Max relative difference: {rel_diff:.2e}")
-    
-    if rel_diff < 1e-4:
-        print("✓ Gradients match (within tolerance)")
+    try:
+        # pysiglib API: pysiglib.signature(path, degree)
+        func = lambda: pysiglib.signature(path, degree=m)
+        method_name = "signature"
+    except Exception as e:
+        print(f"Error setting up pysiglib sig for d={d}, m={m}: {e}", file=sys.stderr)
+        return None
+
+    try:
+        # warmup
+        _ = func()
+
+        t_sec, peak_bytes = time_and_peak_memory(func, repeats=repeats)
+    except Exception as e:
+        print(f"pysiglib benchmark failed for {operation} d={d} m={m}: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        return None
+
+    t_ms = t_sec * 1000.0
+    alloc_kib = peak_bytes / 1024.0
+
+    return {
+        "N": N,
+        "d": d,
+        "m": m,
+        "path_kind": path_kind,
+        "operation": operation,
+        "language": "python",
+        "library": "pysiglib",
+        "method": method_name,
+        "path_type": "ndarray",
+        "t_ms": t_ms,
+        "alloc_KiB": alloc_kib,
+    }
+
+def bench_chensignatures(d: int, m: int, N: int, path_kind: str, operation: str, repeats: int):
+    """
+    Benchmark chen-signatures (Python wrapper around ChenSignatures.jl).
+
+    Assumptions (adjust if your API differs):
+      - import name: chen_signatures or chen
+      - function: chen.sig(path, m) OR chen.signature(path, m)
+    """
+    if not HAS_CHEN:
+        return None
+
+    # For now we only support signature in the Python bench;
+    # if you expose logsig to Python later, you can relax this.
+    if operation != "signature":
+        return None
+
+    path = make_path(d, N, path_kind)
+
+    # Resolve function name once, so the timed closure is clean
+    if hasattr(chen, "signature"):
+        call = chen.signature
+        method_name = "signature"
+    elif hasattr(chen, "sig"):
+        call = chen.sig
+        method_name = "sig"
     else:
-        print("⚠ Gradient differences detected")
+        print("chen-signatures module has neither 'signature' nor 'sig' — skipping.", file=sys.stderr)
+        return None
 
+    try:
+        # warmup
+        _ = call(path, m)
+
+        def func():
+            call(path, m)
+
+        t_sec, peak_bytes = time_and_peak_memory(func, repeats=repeats)
+    except Exception as e:
+        print(f"chen-signatures benchmark failed for {operation} d={d} m={m}: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        return None
+
+    t_ms = t_sec * 1000.0
+    alloc_kib = peak_bytes / 1024.0
+
+    return {
+        "N": N,
+        "d": d,
+        "m": m,
+        "path_kind": path_kind,
+        "operation": operation,
+        "language": "python",
+        "library": "chen-signatures",
+        "method": method_name,
+        "path_type": "ndarray",
+        "t_ms": t_ms,
+        "alloc_KiB": alloc_kib,
+    }
+
+# -------- sweep + write grid to file --------
+
+def run_bench():
+    cfg = load_config()
+    Ns = cfg["Ns"]
+    Ds = cfg["Ds"]
+    Ms = cfg["Ms"]
+    path_kind = cfg["path_kind"]
+    repeats = cfg["repeats"]
+    logsig_method = cfg["logsig_method"]
+    operations = cfg["operations"]
+
+    print("=" * 60)
+    print("Python Benchmark Suite")
+    print("=" * 60)
+    print(f"Configuration:")
+    print(f"  path_kind     = {path_kind}")
+    print(f"  Ns            = {Ns}")
+    print(f"  Ds            = {Ds}")
+    print(f"  Ms            = {Ms}")
+    print(f"  operations    = {operations}")
+    print(f"  repeats       = {repeats}")
+    print(f"  logsig_method = {logsig_method} (iisignature only)")
+    print(f"  iisignature   = {'available' if HAS_IISIG else 'NOT AVAILABLE'}")
+    print(f"  pysiglib      = {'available' if HAS_PYSIGLIB else 'NOT AVAILABLE'}")
+    print(f"  chen-signatures = {'available' if HAS_CHEN else 'NOT AVAILABLE'}")
+    print()
+
+    # Check if orchestrator is overriding output location
+    env_out_csv = os.environ.get("BENCHMARK_OUT_CSV", "")
+    if env_out_csv:
+        # Orchestrator mode: write to specified location
+        csv_path = Path(env_out_csv)
+        csv_path.parent.mkdir(parents=True, exist_ok=True)
+        print(f"Orchestrator mode: writing to {csv_path}")
+        run_dir = None
+    else:
+        # Standalone mode: create own run folder
+        from common import setup_run_folder, finalize_run_folder
+        run_dir = setup_run_folder("benchmark_python", cfg)
+        csv_path = run_dir / "results.csv"
+
+    results = []
+
+    for N in Ns:
+        for d in Ds:
+            for m in Ms:
+                for op in operations:
+                    # Benchmark iisignature
+                    if HAS_IISIG:
+                        res = bench_iisignature(d, m, N, path_kind, op,
+                                                logsig_method, repeats=repeats)
+                        if res is not None:
+                            results.append(res)
+                    
+                    # Benchmark pysiglib (only for signature)
+                    if HAS_PYSIGLIB and op == "signature":
+                        res = bench_pysiglib(d, m, N, path_kind, op, repeats=repeats)
+                        if res is not None:
+                            results.append(res)
+
+                    # Benchmark chen-signatures (signature only for now)
+                    if HAS_CHEN and op == "signature":
+                        res = bench_chensignatures(d, m, N, path_kind, op, repeats=repeats)
+                        if res is not None:
+                            results.append(res)
+
+    fieldnames = [
+        "N", "d", "m", "path_kind", "operation",
+        "language", "library", "method", "path_type",
+        "t_ms", "alloc_KiB",
+    ]
+    with csv_path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in results:
+            writer.writerow(row)
+
+    print("=" * 60)
+    print(f"Results written to: {csv_path}")
+    
+    # Only write summary in standalone mode
+    if run_dir is not None:
+        from common import finalize_run_folder
+        summary = {
+            "total_benchmarks": len(results),
+            "libraries": sorted(set(r["library"] for r in results)),
+            "operations": sorted(set(r["operation"] for r in results)),
+            "output_csv": str(csv_path.name),
+        }
+        
+        finalize_run_folder(run_dir, summary)
+    
+    return csv_path
 
 if __name__ == "__main__":
-    # Speed benchmarks at different scales
-    benchmark_speed(N=100, d=3, m=5)
-    benchmark_speed(N=500, d=5, m=6)
-    benchmark_speed(N=1000, d=5, m=7)
-    
-    # Correctness
-    benchmark_correctness(N=100, d=3, m=5)
-    
-    # Gradients
-    benchmark_gradients(N=50, d=3, m=3)
-    
-    print(f"\n{'='*70}")
-    print("DONE")
-    print(f"{'='*70}\n")
+    run_bench()

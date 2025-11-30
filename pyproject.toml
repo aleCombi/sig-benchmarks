@@ -1,15 +1,13 @@
 [project]
 name = "sig-benchmarks"
 version = "0.1.0"
-requires-python = ">=3.10"
+requires-python = ">=3.9, <3.10"
 dependencies = [
-    "chen-signatures",
+    "chen-signatures==0.2.3",
     "iisignature",
     "pysiglib",
-    "numpy",
+    "numpy<2",
     "torch",
+    "tuna>=0.5.11",
+    "matplotlib>=3.9.4",
 ]
-
-[build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"

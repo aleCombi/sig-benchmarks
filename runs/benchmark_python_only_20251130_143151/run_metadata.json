@@ -1,0 +1,20 @@
+{
+  "run_type": "benchmark_python_only",
+  "timestamp": "20251130_143151",
+  "start_time": "2025-11-30T14:31:51.269610",
+  "end_time": "2025-11-30T14:32:11.086769",
+  "summary": {
+    "python_csv": "python_results.csv",
+    "plots": "python_comparison_3x2.png",
+    "libraries": [
+      "chen-signatures",
+      "iisignature",
+      "pysiglib"
+    ],
+    "avg_time_ms": {
+      "chen-signatures": 0.05491666666671927,
+      "iisignature": 0.23593749999991273,
+      "pysiglib": 0.09493333333310261
+    }
+  }
+}
