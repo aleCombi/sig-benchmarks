@@ -10,12 +10,12 @@ from pathlib import Path
 import sys
 
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
 
-# Import shared utilities
+# Import shared utilities (no CONFIG_PATH to avoid circular issues)
 from common import (
     load_config,
     SCRIPT_DIR,
-    CONFIG_PATH,
     setup_run_folder,
     finalize_run_folder,
 )
@@ -25,15 +25,13 @@ PYPROJECT = SCRIPT_DIR / "pyproject.toml"
 
 # -------- uv project bootstrap --------
 
-
 def ensure_uv_project(libraries):
     """
     Ensure a uv project exists and that required Python deps are installed.
 
-    `libraries` should be the list from the config (e.g.
-    ["chen-signatures", "iisignature", "pysiglib"]).
-
+    `libraries` should be the list from the config (e.g. ["chen-signatures", "iisignature", "pysiglib"]).
     We always add numpy + matplotlib as shared deps.
+    If `libraries` is empty, we won't add any extra benchmark libs automatically.
     """
     if not PYPROJECT.exists():
         print("No pyproject.toml found, initializing uv project in", SCRIPT_DIR)
@@ -44,8 +42,9 @@ def ensure_uv_project(libraries):
         )
 
     base_deps = ["numpy", "matplotlib"]
-    # Avoid duplicates while preserving a stable order
-    all_deps = base_deps + [lib for lib in libraries if lib not in base_deps]
+    # Avoid duplicates while preserving order
+    extra = [lib for lib in (libraries or []) if lib not in base_deps]
+    all_deps = base_deps + extra
 
     print(f"Ensuring Python deps via uv add ({', '.join(all_deps)})...")
     subprocess.run(
@@ -56,7 +55,6 @@ def ensure_uv_project(libraries):
 
 
 # -------- run Python benchmark --------
-
 
 def run_python_benchmark(run_dir: Path, base_env: dict) -> Path:
     print("\n" + "=" * 60)
@@ -91,45 +89,42 @@ def run_python_benchmark(run_dir: Path, base_env: dict) -> Path:
     return python_csv
 
 
-# -------- loading + plotting --------
-
+# -------- loading + helpers --------
 
 def load_python_rows(python_csv: Path):
-    """Load benchmark rows from CSV into a list of dicts with typed fields."""
     rows = []
     with python_csv.open("r", encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            rows.append(
-                {
-                    "N": int(row["N"]),
-                    "d": int(row["d"]),
-                    "m": int(row["m"]),
-                    "path_kind": row["path_kind"].strip(),
-                    "operation": row["operation"].strip(),
-                    "library": row["library"].strip(),
-                    "path_type": row.get("path_type", "").strip(),
-                    "t_ms": float(row["t_ms"]),
-                    "alloc_KiB": float(row["alloc_KiB"]),
-                }
-            )
+            rows.append({
+                "N": int(row["N"]),
+                "d": int(row["d"]),
+                "m": int(row["m"]),
+                "path_kind": row["path_kind"].strip(),
+                "operation": row["operation"].strip(),
+                "library": row["library"].strip(),
+                "path_type": row.get("path_type", "").strip(),
+                "t_ms": float(row["t_ms"]),
+                "alloc_KiB": float(row["alloc_KiB"]),
+            })
     return rows
 
 
 def get_time(rows, lib, N, d, m, path_kind, operation):
-    """Get time (ms) for a specific (lib, N, d, m, path_kind, op) combo or None."""
     for r in rows:
         if (
-            r["N"] == N
-            and r["d"] == d
-            and r["m"] == m
-            and r["path_kind"] == path_kind
-            and r["operation"] == operation
-            and r["library"] == lib
+            r["N"] == N and
+            r["d"] == d and
+            r["m"] == m and
+            r["path_kind"] == path_kind and
+            r["operation"] == operation and
+            r["library"] == lib
         ):
             return r["t_ms"]
     return None
 
+
+# -------- plotting --------
 
 def make_plots(python_csv: Path, runs_dir: Path, cfg: dict):
     print("=== Making Python comparison plots ===")
@@ -151,7 +146,7 @@ def make_plots(python_csv: Path, runs_dir: Path, cfg: dict):
     if not Ms:
         Ms = sorted({r["m"] for r in rows})
 
-    # pick "max" for fixed params
+    # pick "max" for fixed params (worst-case scaling)
     N_fixed_for_d = max(Ns)
     N_fixed_for_m = max(Ns)
 
@@ -164,10 +159,17 @@ def make_plots(python_csv: Path, runs_dir: Path, cfg: dict):
     path_kind = cfg.get("path_kind", "sin")
     operations = cfg.get("operations", ["signature", "logsignature"])
 
-    cfg_libraries = cfg.get("libraries", [])
-    # Only plot libraries that are both in the CSV and requested in config
+    cfg_libraries = cfg.get("libraries", []) or []
+    # Only plot libraries that are both in the CSV and requested in config (if config specifies any)
     csv_libs = sorted({r["library"] for r in rows})
-    python_libs = [lib for lib in csv_libs if not cfg_libraries or lib in cfg_libraries]
+    if cfg_libraries:
+        python_libs = [lib for lib in csv_libs if lib in cfg_libraries]
+    else:
+        python_libs = csv_libs
+
+    if not python_libs:
+        print("No matching libraries between config and CSV; skipping plots.")
+        return
 
     fig, axes = plt.subplots(3, 2, figsize=(10, 12), sharey="col")
 
@@ -224,6 +226,13 @@ def make_plots(python_csv: Path, runs_dir: Path, cfg: dict):
                 if len(xs_effective) >= 2:
                     ax.plot(xs_effective, ys, marker="o", label=lib)
 
+            # X-axis: integer ticks only
+            ax.xaxis.set_major_locator(mticker.MaxNLocator(integer=True))
+
+            # Y-axis: slightly denser ticks on linear scale
+            ax.yaxis.set_major_locator(mticker.MaxNLocator(nbins=7))
+            ax.yaxis.set_major_formatter(mticker.FormatStrFormatter('%g'))
+
             ax.set_xlabel(xlabel)
             ax.set_ylabel("time (ms)")
             ax.grid(True, which="both", linestyle="--", alpha=0.3)
@@ -237,9 +246,8 @@ def make_plots(python_csv: Path, runs_dir: Path, cfg: dict):
                 title += f" (N={N_fixed_for_m}, d={d_fixed_for_m})"
             ax.set_title(title)
 
-            # Only add a legend if there is something to show
-            handles, labels = ax.get_legend_handles_labels()
-            if handles:
+            # Only one legend per column top row
+            if row_idx == 0:
                 ax.legend()
 
     fig.tight_layout()
@@ -251,9 +259,8 @@ def make_plots(python_csv: Path, runs_dir: Path, cfg: dict):
 
 # -------- main --------
 
-
 def main():
-    cfg = load_config(CONFIG_PATH)
+    cfg = load_config()
 
     print("=" * 60)
     print("Python-only Benchmark Comparison (Chen vs others)")
@@ -268,7 +275,7 @@ def main():
     base_env = os.environ.copy()
 
     # Use list of libraries from config
-    libraries = cfg.get("libraries", [])
+    libraries = cfg.get("libraries", []) or []
     ensure_uv_project(libraries)
 
     python_csv = run_python_benchmark(run_dir, base_env)
@@ -277,8 +284,11 @@ def main():
     # Build summary
     rows = load_python_rows(python_csv)
     csv_libs = sorted({r["library"] for r in rows})
-    cfg_libraries = cfg.get("libraries", [])
-    libs = [lib for lib in csv_libs if not cfg_libraries or lib in cfg_libraries]
+    cfg_libraries = libraries
+    if cfg_libraries:
+        libs = [lib for lib in csv_libs if lib in cfg_libraries]
+    else:
+        libs = csv_libs
 
     summary = {
         "python_csv": python_csv.name,
@@ -293,7 +303,8 @@ def main():
             times_by_lib[r["library"]].append(r["t_ms"])
 
     summary["avg_time_ms"] = {
-        lib: (sum(ts) / len(ts)) if ts else None for lib, ts in times_by_lib.items()
+        lib: (sum(ts) / len(ts)) if ts else None
+        for lib, ts in times_by_lib.items()
     }
 
     finalize_run_folder(run_dir, summary)
