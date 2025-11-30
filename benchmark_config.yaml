@@ -3,15 +3,15 @@
 path_kind: "sin"
 
 # N scaling (row 1): path lengths
-Ns: [200, 400, 800, 1600]
+Ns: [200, 400, 800]
 
 # d scaling (row 2): path dimensions
-Ds: [2, 3, 5, 7]
+Ds: [2, 5, 7]
 
 # m scaling (row 3): signature truncation levels
 Ms: [2, 3, 4]
 
-operations: ["logsignature", "signature"]
+operations: ["signature", "logsignature", "sigdiff"]
 
 runs_dir: "runs"
 

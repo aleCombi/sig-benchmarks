@@ -1,6 +1,6 @@
 # compare_benchmarks.py
 # Orchestrator script that runs the Python benchmark
-# (chen-signatures, iisignature, pysiglib, etc. as per config)
+# (iisignature, pysiglib, chen-signatures, etc. as per config)
 # and generates summary CSV + performance plots.
 
 import csv
@@ -10,12 +10,13 @@ from pathlib import Path
 import sys
 
 import matplotlib.pyplot as plt
-import matplotlib.ticker as mticker
+from matplotlib.ticker import MaxNLocator
 
-# Import shared utilities (no CONFIG_PATH to avoid circular issues)
+# Import shared utilities (no circular imports here)
 from common import (
     load_config,
     SCRIPT_DIR,
+    CONFIG_PATH,
     setup_run_folder,
     finalize_run_folder,
 )
@@ -25,13 +26,13 @@ PYPROJECT = SCRIPT_DIR / "pyproject.toml"
 
 # -------- uv project bootstrap --------
 
-def ensure_uv_project(libraries):
+def ensure_uv_project(libraries, operations):
     """
     Ensure a uv project exists and that required Python deps are installed.
 
-    `libraries` should be the list from the config (e.g. ["chen-signatures", "iisignature", "pysiglib"]).
+    `libraries` is the list from the config (e.g. ["chen-signatures", "iisignature", "pysiglib"]).
     We always add numpy + matplotlib as shared deps.
-    If `libraries` is empty, we won't add any extra benchmark libs automatically.
+    If "sigdiff" is in operations and chen-signatures is requested, we also add torch.
     """
     if not PYPROJECT.exists():
         print("No pyproject.toml found, initializing uv project in", SCRIPT_DIR)
@@ -42,9 +43,13 @@ def ensure_uv_project(libraries):
         )
 
     base_deps = ["numpy", "matplotlib"]
-    # Avoid duplicates while preserving order
-    extra = [lib for lib in (libraries or []) if lib not in base_deps]
-    all_deps = base_deps + extra
+
+    # If sigdiff is requested and chen-signatures is in play, we will need torch
+    if "sigdiff" in operations and any(lib == "chen-signatures" for lib in libraries):
+        base_deps.append("torch")
+
+    # Avoid duplicates while preserving a stable order
+    all_deps = base_deps + [lib for lib in libraries if lib not in base_deps]
 
     print(f"Ensuring Python deps via uv add ({', '.join(all_deps)})...")
     subprocess.run(
@@ -84,12 +89,12 @@ def run_python_benchmark(run_dir: Path, base_env: dict) -> Path:
     python_csv = run_dir / "python_results.csv"
     if not python_csv.exists():
         raise RuntimeError(f"Expected Python output not found: {python_csv}")
-
+    
     print(f"✓ Python results: {python_csv.name}")
     return python_csv
 
 
-# -------- loading + helpers --------
+# -------- loading + helper --------
 
 def load_python_rows(python_csv: Path):
     rows = []
@@ -157,28 +162,28 @@ def make_plots(python_csv: Path, runs_dir: Path, cfg: dict):
     m_fixed_for_d = max(Ms)
 
     path_kind = cfg.get("path_kind", "sin")
-    operations = cfg.get("operations", ["signature", "logsignature"])
+    operations_cfg = cfg.get("operations", ["signature", "logsignature"])
+    cfg_libraries = cfg.get("libraries", [])
 
-    cfg_libraries = cfg.get("libraries", []) or []
-    # Only plot libraries that are both in the CSV and requested in config (if config specifies any)
+    # Only plot libraries that are both in the CSV and requested in config
     csv_libs = sorted({r["library"] for r in rows})
     if cfg_libraries:
         python_libs = [lib for lib in csv_libs if lib in cfg_libraries]
     else:
         python_libs = csv_libs
 
-    if not python_libs:
-        print("No matching libraries between config and CSV; skipping plots.")
-        return
+    # We support up to 3 operations: signature, logsignature, sigdiff
+    op_order = ["signature", "logsignature", "sigdiff"]
 
-    fig, axes = plt.subplots(3, 2, figsize=(10, 12), sharey="col")
+    # Set up a 3x3 grid: rows = vary N/d/m, columns = ops
+    fig, axes = plt.subplots(3, 3, figsize=(15, 12), sharey="col")
 
-    op_order = ["signature", "logsignature"]
     for row_idx, vary in enumerate(["N", "d", "m"]):
         for col_idx, op in enumerate(op_order):
             ax = axes[row_idx, col_idx]
 
-            if op not in operations:
+            # If this operation is not requested in config or no data, hide axis.
+            if op not in operations_cfg:
                 ax.set_visible(False)
                 continue
 
@@ -200,6 +205,7 @@ def make_plots(python_csv: Path, runs_dir: Path, cfg: dict):
                 xlabel = "m (signature level)"
 
             # Plot each Python library
+            plotted_any = False
             for lib in python_libs:
                 ys = []
                 xs_effective = []
@@ -225,15 +231,20 @@ def make_plots(python_csv: Path, runs_dir: Path, cfg: dict):
 
                 if len(xs_effective) >= 2:
                     ax.plot(xs_effective, ys, marker="o", label=lib)
+                    plotted_any = True
 
-            # X-axis: integer ticks only
-            ax.xaxis.set_major_locator(mticker.MaxNLocator(integer=True))
+            if not plotted_any:
+                ax.set_visible(False)
+                continue
 
-            # Y-axis: slightly denser ticks on linear scale
-            ax.yaxis.set_major_locator(mticker.MaxNLocator(nbins=7))
-            ax.yaxis.set_major_formatter(mticker.FormatStrFormatter('%g'))
-
+            # X axis: integer ticks
             ax.set_xlabel(xlabel)
+            if xs:
+                ax.set_xticks(xs)
+
+            # Slightly denser y-axis ticks
+            ax.yaxis.set_major_locator(MaxNLocator(nbins=6))
+
             ax.set_ylabel("time (ms)")
             ax.grid(True, which="both", linestyle="--", alpha=0.3)
 
@@ -246,13 +257,15 @@ def make_plots(python_csv: Path, runs_dir: Path, cfg: dict):
                 title += f" (N={N_fixed_for_m}, d={d_fixed_for_m})"
             ax.set_title(title)
 
-            # Only one legend per column top row
+            # Put legends only on the top row (for each column) to reduce clutter
             if row_idx == 0:
-                ax.legend()
+                handles, labels = ax.get_legend_handles_labels()
+                if handles:
+                    ax.legend(handles, labels, fontsize=8)
 
     fig.tight_layout()
     runs_dir.mkdir(parents=True, exist_ok=True)
-    out_plot = runs_dir / "python_comparison_3x2.png"
+    out_plot = runs_dir / "python_comparison_3x3.png"
     fig.savefig(out_plot, dpi=300)
     print(f"Plots written to: {out_plot}")
 
@@ -260,8 +273,8 @@ def make_plots(python_csv: Path, runs_dir: Path, cfg: dict):
 # -------- main --------
 
 def main():
-    cfg = load_config()
-
+    cfg = load_config(CONFIG_PATH)
+    
     print("=" * 60)
     print("Python-only Benchmark Comparison (Chen vs others)")
     print("=" * 60)
@@ -274,29 +287,33 @@ def main():
     run_dir = setup_run_folder("benchmark_python_only", cfg)
     base_env = os.environ.copy()
 
-    # Use list of libraries from config
+    # Use list of libraries from config (required)
     libraries = cfg.get("libraries", []) or []
-    ensure_uv_project(libraries)
+    operations = cfg.get("operations", ["signature", "logsignature"])
+
+    if not libraries:
+        print("WARNING: no libraries specified in config; plots may be empty.", file=sys.stderr)
+
+    ensure_uv_project(libraries, operations)
 
     python_csv = run_python_benchmark(run_dir, base_env)
     make_plots(python_csv, run_dir, cfg)
-
+    
     # Build summary
     rows = load_python_rows(python_csv)
     csv_libs = sorted({r["library"] for r in rows})
-    cfg_libraries = libraries
-    if cfg_libraries:
-        libs = [lib for lib in csv_libs if lib in cfg_libraries]
+    if libraries:
+        libs = [lib for lib in csv_libs if lib in libraries]
     else:
         libs = csv_libs
 
     summary = {
         "python_csv": python_csv.name,
-        "plots": "python_comparison_3x2.png",
+        "plots": "python_comparison_3x3.png",
         "libraries": libs,
     }
 
-    # Simple performance summary: avg time per lib (all configs)
+    # Simple performance summary: avg time per lib (all configs & ops)
     times_by_lib = {lib: [] for lib in libs}
     for r in rows:
         if r["library"] in times_by_lib:
