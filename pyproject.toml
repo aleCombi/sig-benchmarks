@@ -10,4 +10,5 @@ dependencies = [
     "torch",
     "tuna>=0.5.11",
     "matplotlib>=3.9.4",
+    "pyyaml>=6.0.3",
 ]

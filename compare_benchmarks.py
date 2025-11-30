@@ -1,6 +1,6 @@
 # compare_benchmarks.py
 # Orchestrator script that runs the Python benchmark
-# (iisignature, pysiglib, chen-signatures, etc. as per config)
+# (chen-signatures, iisignature, pysiglib, etc. as per config)
 # and generates summary CSV + performance plots.
 
 import csv
@@ -22,13 +22,17 @@ from common import (
 
 PYPROJECT = SCRIPT_DIR / "pyproject.toml"
 
+
 # -------- uv project bootstrap --------
+
 
 def ensure_uv_project(libraries):
     """
     Ensure a uv project exists and that required Python deps are installed.
 
-    `libraries` should be the list from the config (e.g. ["chen-signatures", "iisignature", "pysiglib"]).
+    `libraries` should be the list from the config (e.g.
+    ["chen-signatures", "iisignature", "pysiglib"]).
+
     We always add numpy + matplotlib as shared deps.
     """
     if not PYPROJECT.exists():
@@ -50,7 +54,9 @@ def ensure_uv_project(libraries):
         check=True,
     )
 
+
 # -------- run Python benchmark --------
+
 
 def run_python_benchmark(run_dir: Path, base_env: dict) -> Path:
     print("\n" + "=" * 60)
@@ -80,42 +86,50 @@ def run_python_benchmark(run_dir: Path, base_env: dict) -> Path:
     python_csv = run_dir / "python_results.csv"
     if not python_csv.exists():
         raise RuntimeError(f"Expected Python output not found: {python_csv}")
-    
+
     print(f"✓ Python results: {python_csv.name}")
     return python_csv
 
+
 # -------- loading + plotting --------
 
+
 def load_python_rows(python_csv: Path):
+    """Load benchmark rows from CSV into a list of dicts with typed fields."""
     rows = []
     with python_csv.open("r", encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            rows.append({
-                "N": int(row["N"]),
-                "d": int(row["d"]),
-                "m": int(row["m"]),
-                "path_kind": row["path_kind"].strip(),
-                "operation": row["operation"].strip(),
-                "library": row["library"].strip(),
-                "path_type": row.get("path_type", "").strip(),
-                "t_ms": float(row["t_ms"]),
-                "alloc_KiB": float(row["alloc_KiB"]),
-            })
+            rows.append(
+                {
+                    "N": int(row["N"]),
+                    "d": int(row["d"]),
+                    "m": int(row["m"]),
+                    "path_kind": row["path_kind"].strip(),
+                    "operation": row["operation"].strip(),
+                    "library": row["library"].strip(),
+                    "path_type": row.get("path_type", "").strip(),
+                    "t_ms": float(row["t_ms"]),
+                    "alloc_KiB": float(row["alloc_KiB"]),
+                }
+            )
     return rows
 
+
 def get_time(rows, lib, N, d, m, path_kind, operation):
+    """Get time (ms) for a specific (lib, N, d, m, path_kind, op) combo or None."""
     for r in rows:
         if (
-            r["N"] == N and
-            r["d"] == d and
-            r["m"] == m and
-            r["path_kind"] == path_kind and
-            r["operation"] == operation and
-            r["library"] == lib
+            r["N"] == N
+            and r["d"] == d
+            and r["m"] == m
+            and r["path_kind"] == path_kind
+            and r["operation"] == operation
+            and r["library"] == lib
         ):
             return r["t_ms"]
     return None
+
 
 def make_plots(python_csv: Path, runs_dir: Path, cfg: dict):
     print("=== Making Python comparison plots ===")
@@ -137,7 +151,7 @@ def make_plots(python_csv: Path, runs_dir: Path, cfg: dict):
     if not Ms:
         Ms = sorted({r["m"] for r in rows})
 
-    # pick "max" for fixed params (worst-case scaling)
+    # pick "max" for fixed params
     N_fixed_for_d = max(Ns)
     N_fixed_for_m = max(Ns)
 
@@ -210,7 +224,6 @@ def make_plots(python_csv: Path, runs_dir: Path, cfg: dict):
                 if len(xs_effective) >= 2:
                     ax.plot(xs_effective, ys, marker="o", label=lib)
 
-            # ax.set_yscale("log")
             ax.set_xlabel(xlabel)
             ax.set_ylabel("time (ms)")
             ax.grid(True, which="both", linestyle="--", alpha=0.3)
@@ -224,7 +237,9 @@ def make_plots(python_csv: Path, runs_dir: Path, cfg: dict):
                 title += f" (N={N_fixed_for_m}, d={d_fixed_for_m})"
             ax.set_title(title)
 
-            if row_idx == 0:
+            # Only add a legend if there is something to show
+            handles, labels = ax.get_legend_handles_labels()
+            if handles:
                 ax.legend()
 
     fig.tight_layout()
@@ -233,11 +248,13 @@ def make_plots(python_csv: Path, runs_dir: Path, cfg: dict):
     fig.savefig(out_plot, dpi=300)
     print(f"Plots written to: {out_plot}")
 
+
 # -------- main --------
+
 
 def main():
     cfg = load_config(CONFIG_PATH)
-    
+
     print("=" * 60)
     print("Python-only Benchmark Comparison (Chen vs others)")
     print("=" * 60)
@@ -256,7 +273,7 @@ def main():
 
     python_csv = run_python_benchmark(run_dir, base_env)
     make_plots(python_csv, run_dir, cfg)
-    
+
     # Build summary
     rows = load_python_rows(python_csv)
     csv_libs = sorted({r["library"] for r in rows})
@@ -276,12 +293,12 @@ def main():
             times_by_lib[r["library"]].append(r["t_ms"])
 
     summary["avg_time_ms"] = {
-        lib: (sum(ts) / len(ts)) if ts else None
-        for lib, ts in times_by_lib.items()
+        lib: (sum(ts) / len(ts)) if ts else None for lib, ts in times_by_lib.items()
     }
 
     finalize_run_folder(run_dir, summary)
     print(f"\n✓ Python-only benchmark complete: {run_dir}")
+
 
 if __name__ == "__main__":
     main()
