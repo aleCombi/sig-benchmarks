@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  test:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.9
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Julia
+        uses: julia-actions/setup-julia@v2
+        with:
+          version: "1.10"
+
+      - name: Install Julia dependencies
+        run: |
+          cd adapters/julia
+          julia --project=. -e 'using Pkg; Pkg.instantiate()'
+
+      - name: Run unit tests
+        run: |
+          uv run --with pytest --with numpy pytest tests/ -v
+
+      - name: Run smoke test
+        run: |
+          uv run src/orchestrator.py config/smoke.yaml
+
+      - name: Verify smoke test output
+        run: |
+          # Find latest run folder
+          LATEST_RUN=$(ls -td runs/benchmark_* | head -1)
+          echo "Latest run: $LATEST_RUN"
+
+          # Check results.csv exists and has content
+          if [ ! -f "$LATEST_RUN/results.csv" ]; then
+            echo "Error: results.csv not found"
+            exit 1
+          fi
+
+          # Count data rows (excluding header)
+          ROW_COUNT=$(tail -n +2 "$LATEST_RUN/results.csv" | wc -l)
+          echo "Benchmark results: $ROW_COUNT rows"
+
+          if [ "$ROW_COUNT" -eq 0 ]; then
+            echo "Error: No benchmark results in CSV"
+            exit 1
+          fi
+
+          echo "✓ Smoke test passed with $ROW_COUNT benchmark(s)"
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmark-results
+          path: runs/benchmark_*/
+          retention-days: 30
