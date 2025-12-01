@@ -54,7 +54,7 @@ irm https://astral.sh/uv/install.ps1 | iex
 ### Run Everything (Benchmarks + Plots)
 
 ```bash
-uv run --with pyyaml run_benchmarks.py
+uv run run_benchmarks.py
 ```
 
 This single command will:
@@ -68,12 +68,12 @@ If you want more control:
 
 **Benchmarks only:**
 ```bash
-uv run --with pyyaml src/orchestrator.py
+uv run src/orchestrator.py
 ```
 
 **Plots only:**
 ```bash
-uv run --with matplotlib --with pyyaml src/plotting.py runs/benchmark_TIMESTAMP/results.csv
+uv run src/plotting.py runs/benchmark_TIMESTAMP/results.csv
 ```
 
 ### What Gets Created
@@ -349,10 +349,10 @@ julia --project=. -e 'using Pkg; Pkg.instantiate()'
 
 ### Python dependencies missing
 
-The orchestrator uses `uv` to inject dependencies automatically. If you want to install them globally:
+The orchestrator dependencies should be automatically available via `pyproject.toml`. If you have issues:
 
 ```bash
-uv add pyyaml matplotlib
+uv sync
 ```
 
 ### Benchmarks taking too long

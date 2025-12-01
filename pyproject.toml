@@ -3,12 +3,16 @@ name = "sig-benchmarks"
 version = "0.1.0"
 requires-python = ">=3.9, <3.10"
 dependencies = [
+    "pyyaml>=6.0.3",
+    "matplotlib>=3.9.4",
+    "numpy<2",
+]
+
+# Optional: Install all benchmark libraries
+[project.optional-dependencies]
+all = [
     "chen-signatures==0.2.4",
     "iisignature",
     "pysiglib",
-    "numpy<2",
     "torch",
-    "tuna>=0.5.11",
-    "matplotlib>=3.9.4",
-    "pyyaml>=6.0.3",
 ]
