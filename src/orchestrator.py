@@ -60,18 +60,16 @@ def run_python_adapter(
     deps = library_config.get("deps", [])
 
     # Build uv command with dependency injection
-    # uv run --with <dep1> --with <dep2> --with src/common <script> '<json_config>'
+    # uv run --with <dep1> --with <dep2> <script> '<json_config>'
+    # Note: Adapters add src/ to sys.path themselves, so no need to inject common
     cmd = ["uv", "run"]
 
     # Add dependencies
     for dep in deps:
         cmd.extend(["--with", dep])
 
-    # Inject the common library (as editable install from local path)
-    common_path = str(SRC_DIR / "common")
-    cmd.extend(["--with", common_path])
-
     # Script and config
+    cmd.append("python")
     cmd.append(str(script_path))
     cmd.append(json.dumps(task_config))
 

@@ -158,7 +158,9 @@ if isempty(ARGS)
 end
 
 # Parse configuration from command line
-config = JSON.parse(ARGS[1])
+config_json = JSON.parse(ARGS[1])
+# Convert JSON.Object to Dict
+config = Dict{String, Any}(config_json)
 
 # Run benchmark
 try
