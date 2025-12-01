@@ -54,7 +54,7 @@ irm https://astral.sh/uv/install.ps1 | iex
 ### Run the Full Benchmark Suite
 
 ```bash
-uv run src/orchestrator.py
+uv run --with pyyaml src/orchestrator.py
 ```
 
 This will:
@@ -68,7 +68,7 @@ This will:
 After running benchmarks:
 
 ```bash
-uv run src/plotting.py runs/benchmark_TIMESTAMP/results.csv
+uv run --with matplotlib --with pyyaml src/plotting.py runs/benchmark_TIMESTAMP/results.csv
 ```
 
 This creates a 3x3 comparison grid showing performance across different parameter sweeps.
@@ -192,11 +192,12 @@ Each library benchmark runs in complete isolation:
 
 **Python adapters:**
 ```bash
-uv run --with <dep1> --with <dep2> --with src/common <script> '<json_config>'
+uv run --with <dep1> --with <dep2> python <script> '<json_config>'
 ```
 
 - `uv run` creates an ephemeral environment per invocation
 - Dependencies are injected via `--with` flags
+- Adapters add `src/` to `sys.path` to access common utilities
 - No shared virtualenv or global state
 
 **Julia adapters:**
@@ -372,12 +373,3 @@ julia --project=adapters/julia -e 'using ChenSignatures'
 - **chen-signatures:** Python bindings for ChenSignatures.jl
 - **iisignature:** [GitHub](https://github.com/bottler/iisignature)
 - **pysiglib:** [GitHub](https://github.com/crispitagorico/pysiglib)
-
-## 📝 Legacy Files
-
-The following files are from the old monolithic architecture and will be removed:
-- `benchmark.py` (replaced by orchestrator + adapters)
-- `benchmark.jl` (replaced by `adapters/julia/run_chen.jl`)
-- `compare_benchmarks.py` (replaced by `src/orchestrator.py` + `src/plotting.py`)
-- `common.py` (replaced by `src/common/`)
-- Root `benchmark_config.yaml` (moved to `config/`)
