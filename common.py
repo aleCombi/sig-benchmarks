@@ -101,6 +101,7 @@ def load_config(config_path: Path = CONFIG_PATH) -> Dict[str, Any]:
     logsig_method = raw.get("logsig_method", "O")
     operations = raw.get("operations", ["signature", "logsignature"])
     libraries = _ensure_list(raw.get("libraries", []))
+    julia_libraries = _ensure_list(raw.get("julia_libraries", []))
 
     path_kind = str(path_kind).lower()
     if path_kind not in ("linear", "sin"):
@@ -111,6 +112,7 @@ def load_config(config_path: Path = CONFIG_PATH) -> Dict[str, Any]:
 
     # Normalize libraries as simple strings (pip-style names)
     libraries = [str(lib) for lib in libraries]
+    julia_libraries = [str(lib) for lib in julia_libraries]
 
     return {
         "Ns": Ns,
@@ -122,6 +124,7 @@ def load_config(config_path: Path = CONFIG_PATH) -> Dict[str, Any]:
         "logsig_method": logsig_method,
         "operations": operations,
         "libraries": libraries,
+        "julia_libraries": julia_libraries,
     }
 
 # -------- Path Generators --------

@@ -1,7 +1,6 @@
 # compare_benchmarks.py
-# Orchestrator script that runs the Python benchmark
-# (iisignature, pysiglib, chen-signatures, etc. as per config)
-# and generates summary CSV + performance plots.
+# Orchestrator that runs each tool separately (Julia + per Python lib),
+# stitches all rows into a single CSV, and produces comparison plots.
 
 import csv
 import subprocess
@@ -12,7 +11,6 @@ import sys
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 
-# Import shared utilities (no circular imports here)
 from common import (
     load_config,
     SCRIPT_DIR,
@@ -59,15 +57,50 @@ def ensure_uv_project(libraries, operations):
     )
 
 
-# -------- run Python benchmark --------
+# -------- run Julia benchmark --------
 
-def run_python_benchmark(run_dir: Path, base_env: dict) -> Path:
+def run_julia_benchmark(run_dir: Path) -> Path:
     print("\n" + "=" * 60)
-    print("Running Python Benchmark")
+    print("Running Julia Benchmark")
+    print("=" * 60)
+
+    env = os.environ.copy()
+    env["BENCHMARK_OUT_CSV"] = str(run_dir / "julia_results.csv")
+
+    result = subprocess.run(
+        ["julia", "--project=.", "benchmark.jl"],
+        cwd=SCRIPT_DIR,
+        text=True,
+        capture_output=True,
+        env=env,
+    )
+
+    (run_dir / "julia_stdout.log").write_text(result.stdout, encoding="utf-8")
+    (run_dir / "julia_stderr.log").write_text(result.stderr, encoding="utf-8")
+
+    print(result.stdout)
+    if result.returncode != 0:
+        print(result.stderr, file=sys.stderr)
+        raise RuntimeError(f"Julia benchmark failed with code {result.returncode}")
+
+    julia_csv = run_dir / "julia_results.csv"
+    if not julia_csv.exists():
+        raise RuntimeError(f"Expected Julia output not found: {julia_csv}")
+
+    print(f"-> Julia results: {julia_csv.name}")
+    return julia_csv
+
+
+# -------- run per-library Python benchmark --------
+
+def run_python_library(lib: str, run_dir: Path, base_env: dict) -> Path:
+    print("\n" + "=" * 60)
+    print(f"Running Python Benchmark for {lib}")
     print("=" * 60)
 
     env = base_env.copy()
-    env["BENCHMARK_OUT_CSV"] = str(run_dir / "python_results.csv")
+    env["BENCHMARK_OUT_CSV"] = str(run_dir / f"{lib}_results.csv")
+    env["BENCHMARK_LIBRARIES"] = lib
 
     result = subprocess.run(
         ["uv", "run", "benchmark.py"],
@@ -77,28 +110,29 @@ def run_python_benchmark(run_dir: Path, base_env: dict) -> Path:
         env=env,
     )
 
-    # Save logs
-    (run_dir / "python_stdout.log").write_text(result.stdout, encoding="utf-8")
-    (run_dir / "python_stderr.log").write_text(result.stderr, encoding="utf-8")
+    stdout_path = run_dir / f"{lib}_stdout.log"
+    stderr_path = run_dir / f"{lib}_stderr.log"
+    stdout_path.write_text(result.stdout, encoding="utf-8")
+    stderr_path.write_text(result.stderr, encoding="utf-8")
 
     print(result.stdout)
     if result.returncode != 0:
         print(result.stderr, file=sys.stderr)
-        raise RuntimeError(f"Python benchmark failed with code {result.returncode}")
+        raise RuntimeError(f"{lib} benchmark failed with code {result.returncode}")
 
-    python_csv = run_dir / "python_results.csv"
-    if not python_csv.exists():
-        raise RuntimeError(f"Expected Python output not found: {python_csv}")
-    
-    print(f"✓ Python results: {python_csv.name}")
-    return python_csv
+    csv_path = run_dir / f"{lib}_results.csv"
+    if not csv_path.exists():
+        raise RuntimeError(f"Expected output not found for {lib}: {csv_path}")
+
+    print(f"-> {lib} results: {csv_path.name}")
+    return csv_path
 
 
 # -------- loading + helper --------
 
-def load_python_rows(python_csv: Path):
+def load_rows(csv_path: Path):
     rows = []
-    with python_csv.open("r", encoding="utf-8", newline="") as f:
+    with csv_path.open("r", encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
             rows.append({
@@ -107,12 +141,35 @@ def load_python_rows(python_csv: Path):
                 "m": int(row["m"]),
                 "path_kind": row["path_kind"].strip(),
                 "operation": row["operation"].strip(),
+                "language": row.get("language", "").strip(),
                 "library": row["library"].strip(),
+                "method": row.get("method", "").strip(),
                 "path_type": row.get("path_type", "").strip(),
                 "t_ms": float(row["t_ms"]),
                 "alloc_KiB": float(row["alloc_KiB"]),
             })
     return rows
+
+
+def write_combined_csv(rows, csv_path: Path):
+    fieldnames = [
+        "N",
+        "d",
+        "m",
+        "path_kind",
+        "operation",
+        "language",
+        "library",
+        "method",
+        "path_type",
+        "t_ms",
+        "alloc_KiB",
+    ]
+    with csv_path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
 
 
 def get_time(rows, lib, N, d, m, path_kind, operation):
@@ -131,12 +188,11 @@ def get_time(rows, lib, N, d, m, path_kind, operation):
 
 # -------- plotting --------
 
-def make_plots(python_csv: Path, runs_dir: Path, cfg: dict):
-    print("=== Making Python comparison plots ===")
-    rows = load_python_rows(python_csv)
+def make_plots(rows, runs_dir: Path, cfg: dict):
+    print("=== Making comparison plots ===")
 
     if not rows:
-        print("No rows found in Python CSV; skipping plots.")
+        print("No rows found; skipping plots.")
         return
 
     # config-derived grids
@@ -164,13 +220,15 @@ def make_plots(python_csv: Path, runs_dir: Path, cfg: dict):
     path_kind = cfg.get("path_kind", "sin")
     operations_cfg = cfg.get("operations", ["signature", "logsignature"])
     cfg_libraries = cfg.get("libraries", [])
+    cfg_julia_libs = cfg.get("julia_libraries", [])
 
-    # Only plot libraries that are both in the CSV and requested in config
+    # Only plot libraries that are both in the data and requested in config (if provided)
     csv_libs = sorted({r["library"] for r in rows})
-    if cfg_libraries:
-        python_libs = [lib for lib in csv_libs if lib in cfg_libraries]
+    requested_libs = (cfg_libraries or []) + (cfg_julia_libs or [])
+    if requested_libs:
+        libs_for_plot = [lib for lib in csv_libs if lib in requested_libs]
     else:
-        python_libs = csv_libs
+        libs_for_plot = csv_libs
 
     # We support up to 3 operations: signature, logsignature, sigdiff
     op_order = ["signature", "logsignature", "sigdiff"]
@@ -204,9 +262,8 @@ def make_plots(python_csv: Path, runs_dir: Path, cfg: dict):
                 m_fix = None
                 xlabel = "m (signature level)"
 
-            # Plot each Python library
             plotted_any = False
-            for lib in python_libs:
+            for lib in libs_for_plot:
                 ys = []
                 xs_effective = []
 
@@ -257,7 +314,6 @@ def make_plots(python_csv: Path, runs_dir: Path, cfg: dict):
                 title += f" (N={N_fixed_for_m}, d={d_fixed_for_m})"
             ax.set_title(title)
 
-            # Put legends only on the top row (for each column) to reduce clutter
             if row_idx == 0:
                 handles, labels = ax.get_legend_handles_labels()
                 if handles:
@@ -265,7 +321,7 @@ def make_plots(python_csv: Path, runs_dir: Path, cfg: dict):
 
     fig.tight_layout()
     runs_dir.mkdir(parents=True, exist_ok=True)
-    out_plot = runs_dir / "python_comparison_3x3.png"
+    out_plot = runs_dir / "comparison_3x3.png"
     fig.savefig(out_plot, dpi=300)
     print(f"Plots written to: {out_plot}")
 
@@ -276,7 +332,7 @@ def main():
     cfg = load_config(CONFIG_PATH)
     
     print("=" * 60)
-    print("Python-only Benchmark Comparison (Chen vs others)")
+    print("Tool-by-tool Benchmark Comparison")
     print("=" * 60)
     print("Configuration:")
     for k, v in sorted(cfg.items()):
@@ -284,48 +340,55 @@ def main():
     print()
 
     # Setup run folder
-    run_dir = setup_run_folder("benchmark_python_only", cfg)
+    run_dir = setup_run_folder("benchmark_comparison", cfg)
     base_env = os.environ.copy()
 
-    # Use list of libraries from config (required)
+    # Lists from config
     libraries = cfg.get("libraries", []) or []
+    julia_libraries = cfg.get("julia_libraries", []) or []
     operations = cfg.get("operations", ["signature", "logsignature"])
-
-    if not libraries:
-        print("WARNING: no libraries specified in config; plots may be empty.", file=sys.stderr)
 
     ensure_uv_project(libraries, operations)
 
-    python_csv = run_python_benchmark(run_dir, base_env)
-    make_plots(python_csv, run_dir, cfg)
+    all_rows = []
+    produced_csvs = {}
+
+    # Julia (one project with ChenSignatures.jl)
+    if julia_libraries:
+        julia_csv = run_julia_benchmark(run_dir)
+        produced_csvs["julia"] = julia_csv.name
+        all_rows.extend(load_rows(julia_csv))
+
+    # Python libs one by one
+    for lib in libraries:
+        csv_path = run_python_library(lib, run_dir, base_env)
+        produced_csvs[lib] = csv_path.name
+        all_rows.extend(load_rows(csv_path))
+
+    combined_csv = run_dir / "combined_results.csv"
+    write_combined_csv(all_rows, combined_csv)
+
+    make_plots(all_rows, run_dir, cfg)
     
-    # Build summary
-    rows = load_python_rows(python_csv)
-    csv_libs = sorted({r["library"] for r in rows})
-    if libraries:
-        libs = [lib for lib in csv_libs if lib in libraries]
-    else:
-        libs = csv_libs
+    # Summary
+    libs_present = sorted({r["library"] for r in all_rows})
+    times_by_lib = {lib: [] for lib in libs_present}
+    for r in all_rows:
+        times_by_lib[r["library"]].append(r["t_ms"])
 
     summary = {
-        "python_csv": python_csv.name,
-        "plots": "python_comparison_3x3.png",
-        "libraries": libs,
-    }
-
-    # Simple performance summary: avg time per lib (all configs & ops)
-    times_by_lib = {lib: [] for lib in libs}
-    for r in rows:
-        if r["library"] in times_by_lib:
-            times_by_lib[r["library"]].append(r["t_ms"])
-
-    summary["avg_time_ms"] = {
-        lib: (sum(ts) / len(ts)) if ts else None
-        for lib, ts in times_by_lib.items()
+        "combined_csv": combined_csv.name,
+        "plots": "comparison_3x3.png",
+        "libraries": libs_present,
+        "per_tool_csvs": produced_csvs,
+        "avg_time_ms": {
+            lib: (sum(ts) / len(ts)) if ts else None
+            for lib, ts in times_by_lib.items()
+        },
     }
 
     finalize_run_folder(run_dir, summary)
-    print(f"\n✓ Python-only benchmark complete: {run_dir}")
+    print(f"\n-> Benchmark complete: {run_dir}")
 
 
 if __name__ == "__main__":

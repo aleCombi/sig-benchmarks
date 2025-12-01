@@ -26,3 +26,7 @@ libraries:
   - chen-signatures
   - pysiglib
   - iisignature
+
+# which Julia libraries to benchmark / plot
+julia_libraries:
+  - ChenSignatures.jl  # available from Julia registry

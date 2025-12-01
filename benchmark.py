@@ -423,7 +423,11 @@ def run_bench() -> Path:
     logsig_method = cfg["logsig_method"]
     operations = cfg["operations"]
     runs_dir = cfg["runs_dir"]
-    libraries_cfg = cfg.get("libraries", [])
+    env_libs = os.environ.get("BENCHMARK_LIBRARIES", "")
+    if env_libs.strip():
+        libraries_cfg = [s.strip() for s in env_libs.split(",") if s.strip()]
+    else:
+        libraries_cfg = cfg.get("libraries", [])
 
     print("=" * 60)
     print("Python Benchmark Suite")
