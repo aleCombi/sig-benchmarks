@@ -51,27 +51,38 @@ irm https://astral.sh/uv/install.ps1 | iex
 
 ## 🚀 Quick Start
 
-### Run the Full Benchmark Suite
+### Run Everything (Benchmarks + Plots)
 
+```bash
+uv run --with pyyaml run_benchmarks.py
+```
+
+This single command will:
+1. Run all benchmarks with configured libraries
+2. Generate comparison plots automatically
+3. Show you the output directory
+
+### Run Individual Steps
+
+If you want more control:
+
+**Benchmarks only:**
 ```bash
 uv run --with pyyaml src/orchestrator.py
 ```
 
-This will:
-1. Read configuration from [config/benchmark_sweep.yaml](config/benchmark_sweep.yaml) and [config/libraries_registry.yaml](config/libraries_registry.yaml)
-2. Run each library in strict isolation with ephemeral environments
-3. Aggregate results into a single CSV file
-4. Create a timestamped folder in `runs/benchmark_*/`
-
-### Generate Plots
-
-After running benchmarks:
-
+**Plots only:**
 ```bash
 uv run --with matplotlib --with pyyaml src/plotting.py runs/benchmark_TIMESTAMP/results.csv
 ```
 
-This creates a 3x3 comparison grid showing performance across different parameter sweeps.
+### What Gets Created
+
+Each run creates a timestamped folder in `runs/` containing:
+- `results.csv` - All benchmark results
+- `comparison_3x3.png` - Performance comparison plots
+- `benchmark_sweep.yaml` - Config snapshot
+- `libraries_registry.yaml` - Registry snapshot
 
 ---
 
