@@ -1,0 +1,29 @@
+# benchmark_sweep.yaml
+# Defines the parameter sweep for benchmarking
+
+# Path configuration
+path_kind: "sin"  # "linear" or "sin"
+
+# N scaling (row 1): path lengths
+Ns: [200, 400, 800]
+
+# d scaling (row 2): path dimensions
+Ds: [2, 5, 7]
+
+# m scaling (row 3): signature truncation levels
+Ms: [2, 3, 4]
+
+# Operations to benchmark
+operations:
+  - signature
+  - logsignature
+  - sigdiff
+
+# Number of repeats for each configuration
+repeats: 10
+
+# Method for logsignature computation in iisignature
+logsig_method: "S"
+
+# Output directory for benchmark runs
+runs_dir: "runs"
