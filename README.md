@@ -73,14 +73,54 @@ uv run src/orchestrator.py
 
 **Plots only:**
 ```bash
-uv run src/plotting.py runs/benchmark_TIMESTAMP/results.csv
+# Generate all plot types on latest run
+uv run src/plotting.py --plot-type all
+
+# Generate specific plot type
+uv run src/plotting.py --plot-type heatmap
+
+# Use specific run directory
+uv run src/plotting.py runs/benchmark_TIMESTAMP --plot-type speedup
+
+# List available plot types
+uv run src/plotting.py --list-plots
+```
+
+### Plot Types Available
+
+The plotting tool generates multiple visualization types:
+
+- **`line`** - Original 3×3 grid of line plots showing absolute performance
+- **`heatmap`** - Complete performance landscape across all parameter combinations (log scale)
+- **`speedup`** - Relative performance showing speedup vs baseline (default: slowest library)
+- **`profile`** - Performance profile showing how often each library is competitive
+- **`box`** - Distribution of performance across all benchmarks with outliers
+- **`all`** - Generate all plot types at once (default)
+
+**Examples:**
+```bash
+# Generate all plots
+uv run src/plotting.py
+
+# Only heatmap
+uv run src/plotting.py -t heatmap
+
+# Speedup vs fastest library instead of slowest
+uv run src/plotting.py -t speedup --baseline fastest
+
+# Speedup vs specific library
+uv run src/plotting.py -t speedup --baseline iisignature
 ```
 
 ### What Gets Created
 
 Each run creates a timestamped folder in `runs/` containing:
 - `results.csv` - All benchmark results
-- `comparison_3x3.png` - Performance comparison plots
+- `plot_line.png` - Line plot (original 3×3 grid)
+- `plot_heatmap.png` - Heatmap of all benchmarks
+- `plot_speedup_slowest.png` - Speedup plot vs slowest
+- `plot_profile.png` - Performance profile
+- `plot_box.png` - Box plot distribution
 - `benchmark_sweep.yaml` - Config snapshot
 - `libraries_registry.yaml` - Registry snapshot
 
@@ -118,10 +158,14 @@ Each benchmark run creates a timestamped folder:
 
 ```
 runs/benchmark_20251201_143022/
-├── benchmark_sweep.yaml       # Config snapshot
-├── libraries_registry.yaml    # Registry snapshot
-├── results.csv                # Aggregated benchmark results
-└── comparison_3x3.png         # Performance comparison plots
+├── benchmark_sweep.yaml          # Config snapshot
+├── libraries_registry.yaml       # Registry snapshot
+├── results.csv                   # Aggregated benchmark results
+├── plot_line.png                 # Line plot (3×3 grid)
+├── plot_heatmap.png              # Heatmap visualization
+├── plot_speedup_slowest.png      # Speedup plot
+├── plot_profile.png              # Performance profile
+└── plot_box.png                  # Box plot distribution
 ```
 
 ---
@@ -275,6 +319,39 @@ def run_signature(self, path, d, m):
 ---
 
 ## 📈 Interpreting Results
+
+### Understanding the Plots
+
+**Line Plot (`plot_line.png`):**
+- 3×3 grid showing absolute timing (ms)
+- Rows: vary N, d, or m
+- Columns: different operations
+- Lower lines = faster performance
+
+**Heatmap (`plot_heatmap.png`):**
+- Shows ALL parameter combinations at once
+- Darker colors (blue/purple) = faster
+- Lighter colors (yellow) = slower
+- Numbers show actual milliseconds
+- Best for seeing the complete performance landscape
+
+**Speedup Plot (`plot_speedup_slowest.png`):**
+- Same layout as line plot but shows relative performance
+- Y-axis = speedup factor (higher is better)
+- Dashed line at 1.0 = baseline (slowest library)
+- Easier to see winners than absolute timing
+
+**Performance Profile (`plot_profile.png`):**
+- X-axis: performance ratio (time / best_time)
+- Y-axis: fraction of benchmarks
+- Curves hugging the left edge = consistently fast
+- Used in academic optimization papers
+
+**Box Plot (`plot_box.png`):**
+- Shows distribution across all benchmarks
+- Box = quartiles, line = median
+- Circles = outliers
+- Log scale if data spans multiple orders of magnitude
 
 ### Performance Comparison
 

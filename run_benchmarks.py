@@ -47,7 +47,7 @@ def main():
     # Step 2: Generate plots
     print(f"\n[2/2] Generating plots for {latest_run.name}...")
     result = subprocess.run(
-        ["uv", "run", "--with", "matplotlib", "--with", "pyyaml",
+        ["uv", "run", "--with", "matplotlib", "--with", "numpy", "--with", "pyyaml",
          "src/plotting.py", str(results_csv)],
         cwd=REPO_ROOT,
         capture_output=False,
@@ -61,8 +61,12 @@ def main():
     print("Complete!")
     print("=" * 60)
     print(f"Results: {latest_run}")
-    print(f"  - CSV: {results_csv.name}")
-    print(f"  - Plot: comparison_3x3.png")
+    print(f"  - results.csv")
+    print(f"  - plot_line.png")
+    print(f"  - plot_heatmap.png")
+    print(f"  - plot_speedup_slowest.png")
+    print(f"  - plot_profile.png")
+    print(f"  - plot_box.png")
     print("=" * 60)
 
 
