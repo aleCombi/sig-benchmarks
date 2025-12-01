@@ -32,21 +32,21 @@ def setup_libraries(libraries: List[str]) -> None:
             try:
                 import chen  # type: ignore
                 LIB_MODULES["chen-signatures"] = chen
-                print("✓ chen-signatures available")
+                print("[ok] chen-signatures available")
             except ImportError as e:
                 print(f"Warning: chen-signatures import failed: {e}", file=sys.stderr)
         elif lib == "pysiglib":
             try:
                 import pysiglib  # type: ignore
                 LIB_MODULES["pysiglib"] = pysiglib
-                print("✓ pysiglib available")
+                print("[ok] pysiglib available")
             except ImportError as e:
                 print(f"Warning: pysiglib import failed: {e}", file=sys.stderr)
         elif lib == "iisignature":
             try:
                 import iisignature  # type: ignore
                 LIB_MODULES["iisignature"] = iisignature
-                print("✓ iisignature available")
+                print("[ok] iisignature available")
             except ImportError as e:
                 print(f"Warning: iisignature import failed: {e}", file=sys.stderr)
         else:
@@ -95,14 +95,15 @@ def bench_chen_signatures(
     """
     Benchmarks chen-signatures for:
     - signature: chen.sig(path, m)
+    - logsignature: basis = chen.prepare_logsig(d, m); chen.logsig(path, basis)
     - sigdiff:   gradient of sum(sig) via chen.torch + PyTorch
-    No logsig support here.
     """
     if "chen-signatures" not in LIB_MODULES:
         return None
 
     chen = LIB_MODULES["chen-signatures"]
 
+    # ---------- signature ----------
     if operation == "signature":
         try:
             path = make_path(d, N, path_kind)
@@ -134,11 +135,51 @@ def bench_chen_signatures(
             print(f"chen-signatures signature benchmark failed: {e}", file=sys.stderr)
             return None
 
+    # ---------- logsignature ----------
+    elif operation == "logsignature":
+        # Only run if chen exposes logsig + prepare_logsig
+        if not (hasattr(chen, "logsig") and hasattr(chen, "prepare_logsig")):
+            print("chen-signatures: logsig/prepare_logsig not found, skipping logsignature", file=sys.stderr)
+            return None
+
+        try:
+            path = make_path(d, N, path_kind)
+            path = np.ascontiguousarray(path, dtype=np.float64)
+
+            # Precompute basis outside the timed section
+            basis = chen.prepare_logsig(d, m)
+
+            func = lambda: chen.logsig(path, basis)
+
+            # Warmup
+            _ = func()
+
+            t_sec, peak_bytes = time_and_peak_memory(func, repeats=repeats)
+            t_ms = t_sec * 1000.0
+            alloc_kib = peak_bytes / 1024.0
+
+            return {
+                "N": N,
+                "d": d,
+                "m": m,
+                "path_kind": path_kind,
+                "operation": operation,
+                "language": "python",
+                "library": "chen-signatures",
+                "method": "logsig(prepared)",
+                "path_type": "ndarray",
+                "t_ms": t_ms,
+                "alloc_KiB": alloc_kib,
+            }
+        except Exception as e:
+            print(f"chen-signatures logsignature benchmark failed: {e}", file=sys.stderr)
+            return None
+
+    # ---------- sigdiff (autodiff) ----------
     elif operation == "sigdiff":
         # Gradient speed via PyTorch
         try:
-            # Import chen.torch first (which imports juliacall),
-            # then torch, to avoid the warning about torch before juliacall.
+            # Import chen.torch first (juliacall), then torch
             from chen.torch import sig_torch  # type: ignore
             import torch  # type: ignore
 
@@ -180,9 +221,7 @@ def bench_chen_signatures(
             print(f"chen-signatures sigdiff benchmark failed: {e}", file=sys.stderr)
             return None
 
-    # logsig not supported for chen-signatures
     return None
-
 
 def bench_pysiglib(
     d: int,
@@ -396,7 +435,7 @@ def run_bench() -> Path:
     print(f"  Ms            = {Ms}")
     print(f"  operations    = {operations}")
     print(f"  repeats       = {repeats}")
-    print(f"  logsig_method = {logsig_method} (iisignature only)")
+    print(f"  logsig_method = {logsig_method} (iisignature; chen uses prepare_logsig)")
     print(f"  libraries     = {libraries_cfg}")
     print()
 

@@ -3,7 +3,7 @@ name = "sig-benchmarks"
 version = "0.1.0"
 requires-python = ">=3.9, <3.10"
 dependencies = [
-    "chen-signatures==0.2.3",
+    "chen-signatures==0.2.4",
     "iisignature",
     "pysiglib",
     "numpy<2",
