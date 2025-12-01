@@ -5,20 +5,26 @@
 path_kind: "sin"  # "linear" or "sin"
 
 # N scaling (row 1): path lengths
-Ns: [50]  # Minimal for testing
+# Tests how performance scales with sequence length
+Ns: [200, 500, 1000]
 
 # d scaling (row 2): path dimensions
-Ds: [2]  # Minimal for testing
+# Tests how performance scales with ambient dimension
+Ds: [2, 5, 10]
 
 # m scaling (row 3): signature truncation levels
-Ms: [2]  # Minimal for testing
+# Tests how performance scales with signature depth
+# Note: signature dimension grows as O(d^m)
+Ms: [2, 3, 4]
 
 # Operations to benchmark
 operations:
   - signature
+  - logsignature
 
 # Number of repeats for each configuration
-repeats: 3  # Minimal for testing
+# Higher values give better statistical stability
+repeats: 10
 
 # Method for logsignature computation in iisignature
 logsig_method: "S"
