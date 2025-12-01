@@ -1,14 +1,31 @@
-# ChenSignatures.jl Benchmarks
+# Signature Method Benchmark Suite
 
-Performance benchmarking and validation suite for **ChenSignatures.jl**, comparing it against Python libraries:
-- **iisignature** (industry standard)
-- **pysiglib** (PyTorch-based)
+Performance benchmarking suite for signature computation libraries with **strict isolation** and **methodological fairness**.
 
-Features:
-- End-to-end **runtime and allocation benchmarks** (Julia vs Python)
-- **Scaling analysis** in N (path length), d (dimension), m (signature level)
-- **Correctness validation** against reference implementations
-- **Multiple dispatch benchmarking** (Matrix vs Vector{SVector})
+## Architecture
+
+This benchmark suite uses an **Orchestrator-Adapter** architecture to ensure fair comparisons:
+
+- **Orchestrator** ([src/orchestrator.py](src/orchestrator.py)): Main driver that coordinates benchmark execution
+- **Adapters**: Individual scripts for each library, running in isolated environments
+  - Python adapters use `uv run` with ephemeral environments
+  - Julia adapters use isolated `JULIA_PROJECT` environments
+- **Manual Timing Loops**: Identical timing methodology across languages (no timeit, pyperf, or BenchmarkTools)
+
+## Libraries Benchmarked
+
+- **iisignature** (Python, industry standard)
+- **pysiglib** (Python, PyTorch-based)
+- **chen-signatures** (Python, with autodiff support)
+- **ChenSignatures.jl** (Julia)
+
+## Features
+
+- **Strict Isolation**: Each library runs in its own ephemeral environment
+- **Methodological Fairness**: Identical manual timing loops across all languages
+- **Setup/Kernel Separation**: Only the computation is timed, not data preparation
+- **Multiple Operations**: signature, logsignature, sigdiff (autodiff)
+- **Scaling Analysis**: Varies N (path length), d (dimension), m (signature level)
 
 ---
 
@@ -34,97 +51,109 @@ irm https://astral.sh/uv/install.ps1 | iex
 
 ## 🚀 Quick Start
 
-### Run Everything (Orchestrated)
+### Run the Full Benchmark Suite
 
 ```bash
-cd benchmark
-uv run compare_benchmarks.py
+uv run src/orchestrator.py
 ```
 
 This will:
-1. Run Julia benchmarks (both Matrix and Vector{SVector} dispatches)
-2. Run Python benchmarks (iisignature and pysiglib)
-3. Generate comparison CSV and performance plots
-4. Create a timestamped folder in `runs/benchmark_comparison_*/`
+1. Read configuration from [config/benchmark_sweep.yaml](config/benchmark_sweep.yaml) and [config/libraries_registry.yaml](config/libraries_registry.yaml)
+2. Run each library in strict isolation with ephemeral environments
+3. Aggregate results into a single CSV file
+4. Create a timestamped folder in `runs/benchmark_*/`
 
-### Run Individual Benchmarks
+### Generate Plots
+
+After running benchmarks:
 
 ```bash
-# Julia only
-julia benchmark.jl
-# → Creates runs/benchmark_julia_TIMESTAMP/
-
-# Python only
-uv run benchmark.py
-# → Creates runs/benchmark_python_TIMESTAMP/
-
-# Validation (correctness check)
-uv run check_signatures.py
-# → Creates runs/signature_check_TIMESTAMP/
+uv run src/plotting.py runs/benchmark_TIMESTAMP/results.csv
 ```
+
+This creates a 3x3 comparison grid showing performance across different parameter sweeps.
 
 ---
 
-## 📁 Folder Structure
-
-### Run Folder Organization
-
-Each script creates a timestamped run folder with a descriptive prefix:
-
-| Prefix | Created By | Contents |
-|--------|-----------|----------|
-| `benchmark_julia_*` | `benchmark.jl` | Julia benchmarks (standalone) |
-| `benchmark_python_*` | `benchmark.py` | Python benchmarks (standalone) |
-| `benchmark_comparison_*` | `compare_benchmarks.py` | Full comparison with plots |
-| `signature_check_*` | `check_signatures.py` | Validation results |
-
-### Example: Comparison Run
+## 📁 Repository Structure
 
 ```
-runs/benchmark_comparison_20251128_191349/
-├── benchmark_config.yaml      # Config snapshot (reproducibility)
-├── config_resolved.json       # Resolved configuration
-├── run_metadata.json          # Timestamps, run type
-├── julia_results.csv          # Julia benchmark results
-├── python_results.csv         # Python benchmark results
-├── comparison.csv             # Head-to-head comparison
-├── comparison_3x2.png         # Performance plots (3 params × 2 ops)
-├── julia_stdout.log           # Execution logs
-├── julia_stderr.log
-├── python_stdout.log
-├── python_stderr.log
-└── SUMMARY.txt                # Human-readable summary with speedup stats
+.
+├── config/
+│   ├── benchmark_sweep.yaml       # Parameter sweep configuration
+│   └── libraries_registry.yaml    # Library adapter registry
+├── src/
+│   ├── orchestrator.py            # Main benchmark driver
+│   ├── plotting.py                # Plot generation
+│   └── common/                    # Shared utilities (injectable)
+│       ├── __init__.py
+│       ├── adapter.py             # BenchmarkAdapter base class
+│       └── paths.py               # Path generation utilities
+├── adapters/
+│   ├── python/                    # Python adapter scripts
+│   │   ├── run_iisignature.py
+│   │   ├── run_pysiglib.py
+│   │   └── run_chen.py
+│   └── julia/                     # Julia adapter project
+│       ├── Project.toml
+│       └── run_chen.jl
+├── runs/                          # Benchmark output folders
+└── pyproject.toml                 # Orchestrator dependencies
 ```
 
-### Example: Standalone Run
+### Run Folder Contents
+
+Each benchmark run creates a timestamped folder:
 
 ```
-runs/benchmark_julia_20251128_143022/
-├── benchmark_config.yaml
-├── config_resolved.txt
-├── run_metadata.txt
-├── results.csv                # Benchmark results
-└── SUMMARY.txt                # Summary statistics
+runs/benchmark_20251201_143022/
+├── benchmark_sweep.yaml       # Config snapshot
+├── libraries_registry.yaml    # Registry snapshot
+├── results.csv                # Aggregated benchmark results
+└── comparison_3x3.png         # Performance comparison plots
 ```
 
 ---
 
 ## ⚙️ Configuration
 
-Edit `benchmark_config.yaml` to customize benchmarks:
+### Benchmark Sweep ([config/benchmark_sweep.yaml](config/benchmark_sweep.yaml))
+
+Defines the parameter grid:
 
 ```yaml
 path_kind: "sin"               # "linear" or "sin"
 
-# Scaling parameters
-Ns: [200, 1000, 2000, 10000]  # Path lengths
-Ds: [2, 3, 5, 7, 10]           # Dimensions
-Ms: [2, 3, 4, 5, 6]            # Signature levels
+Ns: [200, 400, 800]            # Path lengths
+Ds: [2, 5, 7]                  # Dimensions
+Ms: [2, 3, 4]                  # Signature levels
 
-operations: ["signature", "logsignature"]
+operations:
+  - signature
+  - logsignature
+  - sigdiff
+
+repeats: 10                    # Timing loop iterations
 runs_dir: "runs"
-repeats: 10                    # Statistical samples per benchmark
-logsig_method: "S"             # iisignature method: "S" or "O"
+```
+
+### Library Registry ([config/libraries_registry.yaml](config/libraries_registry.yaml))
+
+Defines available adapters and their dependencies:
+
+```yaml
+libraries:
+  iisignature:
+    type: python
+    script: "adapters/python/run_iisignature.py"
+    deps: ["iisignature", "numpy"]
+    operations: ["signature", "logsignature"]
+
+  ChenSignatures.jl:
+    type: julia
+    dir: "adapters/julia"
+    script: "run_chen.jl"
+    operations: ["signature", "logsignature"]
 ```
 
 **Note:** Large configurations (high N × d × m) can take significant time. Start small for testing.
@@ -133,78 +162,103 @@ logsig_method: "S"             # iisignature method: "S" or "O"
 
 ## 📊 Output Format
 
-### Unified CSV Schema
+### CSV Schema
 
-All benchmarks use the same schema for easy comparison:
+All benchmarks output to a unified CSV format:
 
 ```csv
-N,d,m,path_kind,operation,language,library,method,path_type,t_ms,alloc_KiB
-1000,3,4,sin,signature,julia,ChenSignatures.jl,signature_path,Matrix,12.5,245.2
-1000,3,4,sin,signature,julia,ChenSignatures.jl,signature_path,Vector{SVector},11.8,180.0
-1000,3,4,sin,signature,python,iisignature,sig,ndarray,15.3,312.8
-1000,3,4,sin,signature,python,pysiglib,signature,ndarray,142.1,890.2
+N,d,m,path_kind,operation,language,library,method,path_type,t_ms
+200,2,2,sin,signature,python,iisignature,sig,ndarray,0.123
+200,2,2,sin,signature,julia,ChenSignatures.jl,signature_path,Vector{SVector},0.089
 ```
 
 **Columns:**
-- `N`, `d`, `m`: Problem parameters
-- `path_kind`: Path type (`linear` or `sin`)
-- `operation`: `signature` or `logsignature`
+- `N`, `d`, `m`: Problem parameters (path length, dimension, signature level)
+- `path_kind`: Path generator type (`linear` or `sin`)
+- `operation`: Operation type (`signature`, `logsignature`, or `sigdiff`)
 - `language`: `julia` or `python`
 - `library`: Implementation name
-- `method`: API function called
-- `path_type`: Input format (`Matrix`, `Vector{SVector}`, `ndarray`)
-- `t_ms`: Time in milliseconds (best of `repeats` runs)
-- `alloc_KiB`: Peak memory allocation in KiB
-
-### Comparison CSV
-
-The orchestrator produces `comparison.csv` with speedup ratios:
-
-```csv
-N,d,m,path_kind,operation,julia_library,julia_path_type,python_library,t_ms_julia,t_ms_python,speed_ratio_python_over_julia,...
-```
-
-**Interpretation:** `speed_ratio > 1.0` means Julia is faster.
-
-### Validation CSV
-
-`check_signatures.py` produces `validation_results.csv`:
-
-```csv
-N,d,m,path_kind,operation,python_library,len_sig,max_abs_diff,l2_diff,rel_l2_diff,status
-```
-
-**Status:** `OK` (passed) or `FAIL` (numerical difference exceeds tolerance).
+- `method`: Specific method/function called
+- `path_type`: Input data structure (`ndarray`, `Vector{SVector}`, `torch`, etc.)
+- `t_ms`: Average time in milliseconds (averaged over `repeats` iterations)
 
 ---
 
-## 🔧 Advanced Usage
+## 🔧 How It Works
 
-### Custom Output Location (Orchestrator Mode)
+### Isolation Guarantees
 
-Scripts can be called with ENV variable override:
+Each library benchmark runs in complete isolation:
 
+**Python adapters:**
 ```bash
-# Direct output to specific file
-BENCHMARK_OUT_CSV=/tmp/my_results.csv julia benchmark.jl
+uv run --with <dep1> --with <dep2> --with src/common <script> '<json_config>'
 ```
 
-This is used internally by `compare_benchmarks.py` to coordinate outputs into a single comparison folder.
+- `uv run` creates an ephemeral environment per invocation
+- Dependencies are injected via `--with` flags
+- No shared virtualenv or global state
 
-### Dual Mode Operation
+**Julia adapters:**
+```bash
+JULIA_PROJECT=adapters/julia julia run_chen.jl '<json_config>'
+```
 
-Each script operates in two modes:
+- Each adapter has its own `Project.toml`
+- No shared global Julia environment
 
-1. **Standalone:** Creates its own folder with full logging
-   ```bash
-   julia benchmark.jl  # → runs/benchmark_julia_*/
-   ```
+### Manual Timing Loop
 
-2. **Orchestrated:** Writes to orchestrator's folder
-   ```bash
-   # Called by compare_benchmarks.py with ENV override
-   BENCHMARK_OUT_CSV=path/to/output.csv julia benchmark.jl
-   ```
+All adapters use the same timing methodology (no timeit/pyperf/BenchmarkTools):
+
+**Python:**
+```python
+# Warmup (untimed)
+for _ in range(3):
+    func()
+
+# Timed loop with GC disabled
+gc.disable()
+t0 = time.perf_counter()
+for _ in range(repeats):
+    func()
+t1 = time.perf_counter()
+gc.enable()
+
+avg_time_ms = ((t1 - t0) / repeats) * 1000
+```
+
+**Julia:**
+```julia
+# Warmup (untimed)
+for _ in 1:3
+    func()
+end
+
+# Timed loop with GC disabled
+GC.enable(false)
+t0 = time_ns()
+for _ in 1:repeats
+    func()
+end
+t1 = time_ns()
+GC.enable(true)
+
+avg_time_ms = ((t1 - t0) / repeats) / 1e6
+```
+
+### Setup/Kernel Separation
+
+Adapters separate "Setup" (untimed) from "Kernel" (timed):
+
+```python
+def run_signature(self, path, d, m):
+    # Setup phase (untimed): data casting, basis preparation
+    path = np.ascontiguousarray(path, dtype=np.float64)
+
+    # Return kernel closure (only this is timed)
+    return lambda: iisignature.sig(path, m)
+```
 
 ---
 
@@ -242,76 +296,88 @@ All implementations should agree within numerical tolerance (`rel_err < 1e-7`).
 
 ### Adding a New Library
 
-1. **Python:** Add benchmark function to `benchmark.py`
-2. **Julia:** Add dispatch to `benchmark.jl`
-3. Schema automatically handles new entries
+1. **Create adapter script** in `adapters/python/` or `adapters/julia/`
+2. **Inherit from BenchmarkAdapter** (Python) or implement equivalent (Julia)
+3. **Register in** [config/libraries_registry.yaml](config/libraries_registry.yaml):
+   ```yaml
+   my-library:
+     type: python
+     script: "adapters/python/run_mylib.py"
+     deps: ["my-library", "numpy"]
+     operations: ["signature"]
+   ```
 
-### Modifying Path Generators
+### Adding a New Path Generator
 
-Edit `common.py` (Python) or `benchmark.jl` (Julia):
-- Add function: `make_path_custom(d, N)`
-- Update `make_path()` dispatcher
-- Add to config: `path_kind: "custom"`
+Edit [src/common/paths.py](src/common/paths.py):
 
----
+```python
+def make_path_custom(d: int, N: int) -> np.ndarray:
+    # Your custom path generation logic
+    pass
 
-## 📝 Files Overview
+def make_path(d: int, N: int, kind: str) -> np.ndarray:
+    # Add to dispatcher
+    if kind == "custom":
+        return make_path_custom(d, N)
+```
 
-| File | Purpose |
-|------|---------|
-| `benchmark.jl` | Julia benchmark runner |
-| `benchmark.py` | Python benchmark runner |
-| `check_signatures.py` | Correctness validation |
-| `compare_benchmarks.py` | Orchestrator (runs all + comparison) |
-| `common.py` | Shared Python utilities (config, paths, logging) |
-| `generate_fixtures.py` | Generate test fixtures for unit tests |
-| `sigcheck.jl` | Helper for validation (called by Python) |
-| `benchmark_config.yaml` | Configuration file |
+For Julia, update [adapters/julia/run_chen.jl](adapters/julia/run_chen.jl) similarly.
 
 ---
 
 ## 🐛 Troubleshooting
 
-### "iisignature not available"
+### Julia dependencies not installed
 
 ```bash
-cd benchmark
-uv add iisignature
+cd adapters/julia
+julia --project=. -e 'using Pkg; Pkg.instantiate()'
 ```
 
-### "Julia Project.toml not found"
+### Python dependencies missing
 
-Run from repo root or set `JULIA_PROJECT`:
-```bash
-JULIA_PROJECT=. julia benchmark/benchmark.jl
-```
-
-### Plots not showing / Matplotlib error
+The orchestrator uses `uv` to inject dependencies automatically. If you want to install them globally:
 
 ```bash
-uv add matplotlib
+uv add pyyaml matplotlib
 ```
 
 ### Benchmarks taking too long
 
-Reduce grid size in `benchmark_config.yaml`:
+Reduce grid size in [config/benchmark_sweep.yaml](config/benchmark_sweep.yaml):
 ```yaml
-Ns: [200, 1000]    # Fewer values
-Ds: [2, 3]
-Ms: [2, 3, 4]
-repeats: 5         # Fewer samples
+Ns: [200, 400]     # Fewer values
+Ds: [2, 5]
+Ms: [2, 3]
+repeats: 5         # Fewer iterations
+```
+
+### Adapter fails to run
+
+Check the library is available:
+```bash
+# Python
+uv run python -c "import iisignature; print(iisignature.__version__)"
+
+# Julia
+julia --project=adapters/julia -e 'using ChenSignatures'
 ```
 
 ---
 
-## 📚 References
+## 📚 Libraries
 
-- **ChenSignatures.jl:** Main library being benchmarked
+- **ChenSignatures.jl:** [GitHub](https://github.com/improbable-research/ChenSignatures.jl)
+- **chen-signatures:** Python bindings for ChenSignatures.jl
 - **iisignature:** [GitHub](https://github.com/bottler/iisignature)
 - **pysiglib:** [GitHub](https://github.com/crispitagorico/pysiglib)
 
----
+## 📝 Legacy Files
 
-## 📄 License
-
-Same as parent project (ChenSignatures.jl).
+The following files are from the old monolithic architecture and will be removed:
+- `benchmark.py` (replaced by orchestrator + adapters)
+- `benchmark.jl` (replaced by `adapters/julia/run_chen.jl`)
+- `compare_benchmarks.py` (replaced by `src/orchestrator.py` + `src/plotting.py`)
+- `common.py` (replaced by `src/common/`)
+- Root `benchmark_config.yaml` (moved to `config/`)
