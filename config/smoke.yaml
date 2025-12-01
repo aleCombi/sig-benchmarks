@@ -1,0 +1,19 @@
+# Smoke test configuration - minimal, fast benchmark for CI/CD
+# Expected runtime: < 5 seconds
+
+path_kind: "sin"
+
+# Minimal parameter sweep
+Ns: [50]
+Ds: [2]
+Ms: [2]
+
+# Only test signature operation (fastest)
+operations:
+  - signature
+
+# Minimal repeats for speed
+repeats: 3
+
+# Output directory
+runs_dir: "runs"
