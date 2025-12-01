@@ -1,5 +1,6 @@
 """Orchestrator for signature benchmark suite"""
 
+import argparse
 import csv
 import json
 import os
@@ -18,7 +19,7 @@ REPO_ROOT = SRC_DIR.parent
 
 # Configuration paths
 CONFIG_DIR = REPO_ROOT / "config"
-SWEEP_CONFIG = CONFIG_DIR / "benchmark_sweep.yaml"
+DEFAULT_SWEEP_CONFIG = CONFIG_DIR / "benchmark_sweep.yaml"
 REGISTRY_CONFIG = CONFIG_DIR / "libraries_registry.yaml"
 
 
@@ -156,10 +157,18 @@ def run_julia_adapter(
         raise
 
 
-def run_orchestrator():
-    """Main orchestrator logic"""
+def run_orchestrator(config_path: Path = None):
+    """
+    Main orchestrator logic
+
+    Args:
+        config_path: Optional path to benchmark sweep config (default: config/benchmark_sweep.yaml)
+    """
+    # Determine which sweep config to use
+    sweep_config = config_path if config_path else DEFAULT_SWEEP_CONFIG
+
     # Load configurations
-    sweep = load_yaml(SWEEP_CONFIG)
+    sweep = load_yaml(sweep_config)
     registry = load_yaml(REGISTRY_CONFIG)
 
     # Extract sweep parameters
@@ -176,7 +185,7 @@ def run_orchestrator():
 
     # Save configuration snapshot
     (run_dir / "benchmark_sweep.yaml").write_text(
-        SWEEP_CONFIG.read_text(encoding="utf-8"),
+        sweep_config.read_text(encoding="utf-8"),
         encoding="utf-8"
     )
     (run_dir / "libraries_registry.yaml").write_text(
@@ -277,4 +286,28 @@ def run_orchestrator():
 
 
 if __name__ == "__main__":
-    run_orchestrator()
+    parser = argparse.ArgumentParser(
+        description="Signature benchmark orchestrator",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Run with default config
+  uv run src/orchestrator.py
+
+  # Run with custom config
+  uv run src/orchestrator.py config/smoke.yaml
+
+  # Run smoke test
+  uv run src/orchestrator.py config/smoke.yaml
+        """
+    )
+    parser.add_argument(
+        "config",
+        nargs="?",
+        type=Path,
+        default=None,
+        help="Path to benchmark sweep config (default: config/benchmark_sweep.yaml)"
+    )
+
+    args = parser.parse_args()
+    run_orchestrator(config_path=args.config)
