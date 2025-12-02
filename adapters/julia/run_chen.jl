@@ -7,26 +7,60 @@ using JSON
 
 # -------- Path Generators --------
 
-"""Generate linear path: [t, 2t, 2t, ...]"""
-function make_path_linear(d::Int, N::Int)
+"""Generate linear path of static vectors: [t, 2t, 2t, ...]"""
+function make_path_linear_svector(d::Int, N::Int)
     ts = range(0.0, stop=1.0, length=N)
     [SVector{d,Float64}(ntuple(i -> (i == 1 ? t : 2t), d)) for t in ts]
 end
 
-"""Generate sinusoidal path: [sin(2π·1·t), sin(2π·2·t), ...]"""
-function make_path_sin(d::Int, N::Int)
+"""Generate linear path as dense matrix (N x d)"""
+function make_path_linear_matrix(d::Int, N::Int)
     ts = range(0.0, stop=1.0, length=N)
-    ω = 2π
-    [SVector{d,Float64}(ntuple(i -> sin(ω * i * t), d)) for t in ts]
+    path = Array{Float64}(undef, N, d)
+    path[:, 1] .= ts
+    if d > 1
+        @views path[:, 2:end] .= 2.0 .* ts
+    end
+    return path
 end
 
-"""Generate path of specified kind"""
-function make_path(d::Int, N::Int, kind::String)
+"""Generate sinusoidal path of static vectors: [sin(2pi*1*t), sin(2pi*2*t), ...]"""
+function make_path_sin_svector(d::Int, N::Int)
+    ts = range(0.0, stop=1.0, length=N)
+    omega = 2.0 * pi
+    [SVector{d,Float64}(ntuple(i -> sin(omega * i * t), d)) for t in ts]
+end
+
+"""Generate sinusoidal path as dense matrix: [sin(2pi*1*t), sin(2pi*2*t), ...]"""
+function make_path_sin_matrix(d::Int, N::Int)
+    ts = range(0.0, stop=1.0, length=N)
+    omega = 2.0 * pi
+    path = Array{Float64}(undef, N, d)
+    for j in 1:d
+        @views path[:, j] .= sin.(omega * j .* ts)
+    end
+    return path
+end
+
+"""Generate path of specified kind as Vector of SVectors"""
+function make_path_svector(d::Int, N::Int, kind::String)
     kind_lower = lowercase(kind)
     if kind_lower == "linear"
-        return make_path_linear(d, N)
+        return make_path_linear_svector(d, N)
     elseif kind_lower == "sin"
-        return make_path_sin(d, N)
+        return make_path_sin_svector(d, N)
+    else
+        error("Unknown path_kind: $kind")
+    end
+end
+
+"""Generate path of specified kind as dense matrix"""
+function make_path_matrix(d::Int, N::Int, kind::String)
+    kind_lower = lowercase(kind)
+    if kind_lower == "linear"
+        return make_path_linear_matrix(d, N)
+    elseif kind_lower == "sin"
+        return make_path_sin_matrix(d, N)
     else
         error("Unknown path_kind: $kind")
     end
@@ -105,6 +139,18 @@ function run_logsignature(path, m::Int)
     return () -> ChenSignatures.log(signature_path(tensor_type, path, m))
 end
 
+"""Select operation and prepare kernel closure"""
+function prepare_kernel(path, operation::String, m::Int)
+    if operation == "signature"
+        return run_signature(path, m), "signature_path"
+    elseif operation == "logsignature"
+        return run_logsignature(path, m), "log"
+    else
+        # Operation not supported (sigdiff not available yet)
+        error("Unsupported operation: $operation")
+    end
+end
+
 # -------- Main Benchmark Runner --------
 
 """Format benchmark result for JSON output"""
@@ -134,34 +180,29 @@ function run_benchmark(config::Dict)
     operation = config["operation"]
     repeats = config["repeats"]
 
-    # Generate path
-    path = make_path(d, N, path_kind)
+    path_variants = [
+        ("Vector{SVector}", make_path_svector(d, N, path_kind)),
+        ("Matrix{Float64}", make_path_matrix(d, N, path_kind))
+    ]
 
-    # Select operation and prepare kernel
-    if operation == "signature"
-        kernel = run_signature(path, m)
-        method = "signature_path"
-    elseif operation == "logsignature"
-        kernel = run_logsignature(path, m)
-        method = "log"
-    else
-        # Operation not supported (sigdiff not available yet)
-        error("Unsupported operation: $operation")
+    for (path_label, path_data) in path_variants
+        # Prepare kernel for this operation
+        kernel, method = prepare_kernel(path_data, operation, m)
+
+        # Run manual timing loop
+        t_ms, alloc_bytes = manual_timing_loop(kernel, repeats)
+
+        # Format result
+        result = output_result(
+            N, d, m, path_kind, operation, t_ms, alloc_bytes,
+            "ChenSignatures.jl",
+            method,
+            path_label
+        )
+
+        # Output as JSON
+        println(JSON.json(result))
     end
-
-    # Run manual timing loop
-    t_ms, alloc_bytes = manual_timing_loop(kernel, repeats)
-
-    # Format result
-    result = output_result(
-        N, d, m, path_kind, operation, t_ms, alloc_bytes,
-        "ChenSignatures.jl",
-        method,
-        "Vector{SVector}"
-    )
-
-    # Output as JSON
-    println(JSON.json(result))
 end
 
 # -------- Entry Point --------

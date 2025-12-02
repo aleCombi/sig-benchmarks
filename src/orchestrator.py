@@ -104,7 +104,7 @@ def run_julia_adapter(
     library_name: str,
     library_config: Dict[str, Any],
     task_config: Dict[str, Any]
-) -> Dict[str, Any]:
+) -> List[Dict[str, Any]]:
     """
     Run a Julia adapter with project environment.
 
@@ -114,7 +114,7 @@ def run_julia_adapter(
         task_config: Task parameters (N, d, m, etc.)
 
     Returns:
-        Benchmark result dictionary
+        List of benchmark result dictionaries
     """
     julia_dir = REPO_ROOT / library_config["dir"]
     script = julia_dir / library_config["script"]
@@ -141,12 +141,16 @@ def run_julia_adapter(
             env=env,
         )
 
-        # Parse JSON output from stdout
+        # Parse JSON output from stdout (one line per benchmark result)
+        outputs: List[Dict[str, Any]] = []
         output_lines = result.stdout.strip().split('\n')
         for line in output_lines:
             line = line.strip()
             if line.startswith('{'):
-                return json.loads(line)
+                outputs.append(json.loads(line))
+
+        if outputs:
+            return outputs
 
         raise RuntimeError(f"No JSON output from {library_name}")
 
@@ -249,7 +253,13 @@ def run_orchestrator(config_path: Path = None):
                                 print(f"Unknown library type: {library_config['type']}", file=sys.stderr)
                                 continue
 
-                            all_results.append(result)
+                            if result is None:
+                                continue
+
+                            if isinstance(result, list):
+                                all_results.extend(result)
+                            else:
+                                all_results.append(result)
 
                         except Exception as e:
                             print(f"Failed: {e}", file=sys.stderr)
