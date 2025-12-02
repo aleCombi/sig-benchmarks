@@ -4,7 +4,8 @@ import gc
 import json
 import sys
 import time
-from typing import Any, Callable, Dict, Optional
+import tracemalloc
+from typing import Any, Callable, Dict, Optional, Tuple
 
 
 class BenchmarkAdapter:
@@ -44,7 +45,7 @@ class BenchmarkAdapter:
         self,
         func: Callable[[], Any],
         warmup_iterations: int = 3
-    ) -> float:
+    ) -> Tuple[float, int]:
         """
         Execute manual timing loop with warmup and GC disabled.
 
@@ -53,26 +54,39 @@ class BenchmarkAdapter:
             warmup_iterations: Number of warmup runs before timing
 
         Returns:
-            Average time per iteration in milliseconds
+            Tuple of (avg_time_ms, alloc_bytes):
+                - avg_time_ms: Average time per iteration in milliseconds
+                - alloc_bytes: Average bytes allocated per iteration
         """
         # Warmup phase (untimed)
         for _ in range(warmup_iterations):
             func()
 
-        # Timed phase with GC disabled
+        # Timed phase with GC disabled and allocation tracking
         gc.disable()
+        tracemalloc.start()
         try:
             t0 = time.perf_counter()
+            mem0_current, mem0_peak = tracemalloc.get_traced_memory()
+
             for _ in range(self.repeats):
                 func()
+
+            mem1_current, mem1_peak = tracemalloc.get_traced_memory()
             t1 = time.perf_counter()
         finally:
+            tracemalloc.stop()
             gc.enable()
 
         # Calculate average time in milliseconds
         total_time_sec = t1 - t0
         avg_time_ms = (total_time_sec / self.repeats) * 1000.0
-        return avg_time_ms
+
+        # Calculate average bytes allocated per iteration
+        total_alloc_bytes = mem1_current - mem0_current
+        avg_alloc_bytes = total_alloc_bytes // self.repeats if self.repeats > 0 else 0
+
+        return avg_time_ms, avg_alloc_bytes
 
     def run_signature(self, path, d: int, m: int) -> Optional[Callable]:
         """
@@ -159,6 +173,7 @@ class BenchmarkAdapter:
     def output_result(
         self,
         t_ms: float,
+        alloc_bytes: int,
         library: str,
         method: str,
         path_type: str = "ndarray",
@@ -169,6 +184,7 @@ class BenchmarkAdapter:
 
         Args:
             t_ms: Time in milliseconds
+            alloc_bytes: Bytes allocated
             library: Library name
             method: Method name
             path_type: Path type descriptor
@@ -188,4 +204,5 @@ class BenchmarkAdapter:
             "method": method,
             "path_type": path_type,
             "t_ms": t_ms,
+            "alloc_bytes": alloc_bytes,
         }

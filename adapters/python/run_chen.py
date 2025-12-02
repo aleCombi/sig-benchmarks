@@ -103,11 +103,12 @@ class ChenSignaturesAdapter(BenchmarkAdapter):
             return None
 
         # Run manual timing loop
-        t_ms = self.manual_timing_loop(kernel)
+        t_ms, alloc_bytes = self.manual_timing_loop(kernel)
 
         # Format and return result
         return self.output_result(
             t_ms=t_ms,
+            alloc_bytes=alloc_bytes,
             library="chen-signatures",
             method=method,
             path_type=path_type,

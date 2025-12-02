@@ -268,6 +268,7 @@ def run_orchestrator(config_path: Path = None):
         "method",
         "path_type",
         "t_ms",
+        "alloc_bytes",
     ]
 
     with csv_path.open("w", newline="", encoding="utf-8") as f:

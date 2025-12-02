@@ -38,6 +38,10 @@ end
 Execute manual timing loop with warmup and GC disabled.
 
 This is the Julia equivalent of the Python BenchmarkAdapter.manual_timing_loop.
+
+Returns a tuple of (avg_time_ms, avg_alloc_bytes):
+    - avg_time_ms: Average time per iteration in milliseconds
+    - avg_alloc_bytes: Average bytes allocated per iteration
 """
 function manual_timing_loop(func::Function, repeats::Int; warmup_iterations::Int=3)
     # Warmup phase (untimed)
@@ -45,14 +49,19 @@ function manual_timing_loop(func::Function, repeats::Int; warmup_iterations::Int
         func()
     end
 
-    # Timed phase with GC disabled
+    # Timed phase with GC disabled and allocation tracking
     GC.enable(false)
-    local t0, t1
+    local t0, t1, total_alloc_bytes
     try
         t0 = time_ns()
-        for _ in 1:repeats
-            func()
+
+        # Track allocations for all iterations
+        total_alloc_bytes = @allocated begin
+            for _ in 1:repeats
+                func()
+            end
         end
+
         t1 = time_ns()
     finally
         GC.enable(true)
@@ -61,7 +70,11 @@ function manual_timing_loop(func::Function, repeats::Int; warmup_iterations::Int
     # Calculate average time in milliseconds
     total_time_ns = t1 - t0
     avg_time_ms = (total_time_ns / repeats) / 1e6
-    return avg_time_ms
+
+    # Calculate average bytes allocated per iteration
+    avg_alloc_bytes = div(total_alloc_bytes, repeats)
+
+    return avg_time_ms, avg_alloc_bytes
 end
 
 # -------- Benchmark Operations --------
@@ -95,7 +108,7 @@ end
 # -------- Main Benchmark Runner --------
 
 """Format benchmark result for JSON output"""
-function output_result(N, d, m, path_kind, operation, t_ms, library, method, path_type)
+function output_result(N, d, m, path_kind, operation, t_ms, alloc_bytes, library, method, path_type)
     return Dict(
         "N" => N,
         "d" => d,
@@ -106,7 +119,8 @@ function output_result(N, d, m, path_kind, operation, t_ms, library, method, pat
         "library" => library,
         "method" => method,
         "path_type" => path_type,
-        "t_ms" => t_ms
+        "t_ms" => t_ms,
+        "alloc_bytes" => alloc_bytes
     )
 end
 
@@ -136,11 +150,11 @@ function run_benchmark(config::Dict)
     end
 
     # Run manual timing loop
-    t_ms = manual_timing_loop(kernel, repeats)
+    t_ms, alloc_bytes = manual_timing_loop(kernel, repeats)
 
     # Format result
     result = output_result(
-        N, d, m, path_kind, operation, t_ms,
+        N, d, m, path_kind, operation, t_ms, alloc_bytes,
         "ChenSignatures.jl",
         method,
         "Vector{SVector}"
