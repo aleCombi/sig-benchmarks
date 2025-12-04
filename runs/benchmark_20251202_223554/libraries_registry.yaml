@@ -1,0 +1,49 @@
+# libraries_registry.yaml
+# Registry of adapters and their dependencies
+
+libraries:
+  iisignature:
+    type: python
+    script: "adapters/python/run_iisignature.py"
+    deps:
+      - iisignature
+      - numpy
+      - psutil
+    memory_mode: rss
+    operations:
+      - signature
+      - logsignature
+
+  pysiglib:
+    type: python
+    script: "adapters/python/run_pysiglib.py"
+    deps:
+      - pysiglib
+      - numpy
+      - psutil
+    operations:
+      - signature
+      - sigdiff
+    memory_mode: rss
+
+  chen-signatures:
+    type: python
+    script: "adapters/python/run_chen.py"
+    deps:
+      - chen-signatures
+      - numpy
+      - psutil
+      - torch  # Required for sigdiff
+    memory_mode: rss
+    operations:
+      - signature
+      - logsignature
+      - sigdiff
+
+  ChenSignatures.jl:
+    type: julia
+    dir: "adapters/julia"
+    script: "run_chen.jl"
+    operations:
+      - signature
+      - logsignature

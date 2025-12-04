@@ -27,6 +27,16 @@ This benchmark suite uses an **Orchestrator-Adapter** architecture to ensure fai
 - **Multiple Operations**: signature, logsignature, sigdiff (autodiff)
 - **Scaling Analysis**: Varies N (path length), d (dimension), m (signature level)
 
+## Latest Public Run (2025-12-02)
+
+The newest full benchmark is checked into the repo at `runs/benchmark_20251202_223554/` so results are browseable without rerunning.
+
+- Data: [`results.csv`](runs/benchmark_20251202_223554/results.csv)
+- Plots: [`plot_heatmap.png`](runs/benchmark_20251202_223554/plot_heatmap.png), [`plot_speedup_slowest.png`](runs/benchmark_20251202_223554/plot_speedup_slowest.png), [`plot_profile.png`](runs/benchmark_20251202_223554/plot_profile.png), [`plot_box.png`](runs/benchmark_20251202_223554/plot_box.png), [`plot_line.png`](runs/benchmark_20251202_223554/plot_line.png)
+- Config snapshots: [`benchmark_sweep.yaml`](runs/benchmark_20251202_223554/benchmark_sweep.yaml), [`libraries_registry.yaml`](runs/benchmark_20251202_223554/libraries_registry.yaml)
+
+![Benchmark heatmap preview](runs/benchmark_20251202_223554/plot_heatmap.png)
+
 ---
 
 ## 📋 Prerequisites
